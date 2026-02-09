@@ -17,6 +17,8 @@ import {
   Loader2,
   Move,
   GripHorizontal,
+  Volume2,
+  VolumeX,
 } from "lucide-react";
 import type { MapData, Node } from "@/types/navigation";
 import NavigationSummary from "./NavigationSummary";
@@ -292,6 +294,15 @@ export default function IndoorNavigation({
   const pausedProgressRef = useRef(0); // Store progress when paused
   const startTimeRef = useRef<number | null>(null);
   const baseDurationRef = useRef(0);
+
+  // Voice summary controls
+  const [voiceControls, setVoiceControls] = useState<{
+    speak: (text: string) => void;
+    stop: () => void;
+    isSpeaking: boolean;
+    hasBrowserSupport: boolean;
+    currentSummary: string | null;
+  } | null>(null);
 
   // Use the new image dimensions hook - calculates ACTUAL rendered image size
   // This fixes the "drifting coordinates" bug when image aspect ratio differs from container
@@ -735,6 +746,36 @@ export default function IndoorNavigation({
 
           {/* Right: Action Buttons */}
           <div className="flex items-center gap-2 flex-shrink-0">
+            {/* Voice Replay Button - Always visible when summary available */}
+            {voiceControls?.hasBrowserSupport &&
+              voiceControls?.currentSummary && (
+                <button
+                  onClick={() => {
+                    if (voiceControls.isSpeaking) {
+                      voiceControls.stop();
+                    } else if (voiceControls.currentSummary) {
+                      voiceControls.speak(voiceControls.currentSummary);
+                    }
+                  }}
+                  className={`p-2 rounded-lg transition-colors ${
+                    voiceControls.isSpeaking
+                      ? "bg-red-100 text-red-600 hover:bg-red-200"
+                      : "bg-blue-100 text-blue-600 hover:bg-blue-200"
+                  }`}
+                  title={
+                    voiceControls.isSpeaking
+                      ? "Stop voice"
+                      : "Replay voice guide"
+                  }
+                >
+                  {voiceControls.isSpeaking ? (
+                    <VolumeX className="w-5 h-5" />
+                  ) : (
+                    <Volume2 className="w-5 h-5" />
+                  )}
+                </button>
+              )}
+
             {/* Gateway: Continue Button */}
             {status === "WAITING_AT_GATEWAY" && (
               <motion.button
@@ -842,7 +883,7 @@ export default function IndoorNavigation({
           )}
         </AnimatePresence>
 
-        {/* Navigation Summary Panel */}
+        {/* Navigation Summary (Headless - No UI, just voice) */}
         {status === "NAVIGATING" && pathNodes.length > 0 && currentSegment && (
           <NavigationSummary
             pathNodes={pathNodes}
@@ -852,6 +893,7 @@ export default function IndoorNavigation({
               (navigationResult?.segments.length ?? 1) - 1
             }
             isVisible={true}
+            onVoiceControlsReady={setVoiceControls}
           />
         )}
 
