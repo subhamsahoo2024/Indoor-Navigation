@@ -94,6 +94,7 @@ GEMINI_API_KEY=your_gemini_api_key
 # App Settings
 NEXT_PUBLIC_USE_DATABASE=true
 
+# Gemini Model
 GEMINI_MODEL= gemini-3-flash-preview
 ```
 
@@ -113,11 +114,3 @@ npm run dev
 - **Wayfinding Anxiety:** Reduces stress for new students, visitors, and patients in large, high-pressure environments like hospitals and universities.
 
 ---
-
-## **📄 License**
-
-This project is licensed under the [MIT License](https://www.google.com/search?q=LICENSE).
-
----
-
-### **Would you like me to generate the 3-minute video script to match this README?**
