@@ -6,12 +6,12 @@ NavX is a next-generation indoor navigation platform that transforms static buil
 
 ## **✨ Key Features**
 
-* **AI-Automated Map Digitization:** Leverages **Gemini 3 Vision** to detect room labels and infrastructure on architectural floor plans, automatically generating node coordinates with 1000x1000 pixel precision.
-* **Dynamic Shortest-Path Navigation:** Implements Dijkstra’s algorithm to calculate the most efficient route between any two points in a complex graph.
-* **Contextual AI Summaries:** Gemini 3 analyzes the calculated path to generate natural language instructions (e.g., *"Pass the library on your left and continue toward the main hall"*).
-* **Multi-Floor Awareness:** Seamlessly handles transitions between maps with AI-driven prompts to guide users across elevators and stairwells.
-* **Voice-Guided Assistance:** Integrated **Text-to-Speech (TTS)** with optimized pacing (0.8x rate) for clear, eyes-free navigation in busy hallways.
-* **Responsive SVG Overlay:** A high-performance, non-scaling SVG layer that renders sharp navigation paths regardless of device resolution.
+- **AI-Automated Map Digitization:** Leverages **Gemini 3 Vision** to detect room labels and infrastructure on architectural floor plans, automatically generating node coordinates with 1000x1000 pixel precision.
+- **Dynamic Shortest-Path Navigation:** Implements Dijkstra’s algorithm to calculate the most efficient route between any two points in a complex graph.
+- **Contextual AI Summaries:** Gemini 3 analyzes the calculated path to generate natural language instructions (e.g., _"Pass the library on your left and continue toward the main hall"_).
+- **Multi-Floor Awareness:** Seamlessly handles transitions between maps with AI-driven prompts to guide users across elevators and stairwells.
+- **Voice-Guided Assistance:** Integrated **Text-to-Speech (TTS)** with optimized pacing (0.8x rate) for clear, eyes-free navigation in busy hallways.
+- **Responsive SVG Overlay:** A high-performance, non-scaling SVG layer that renders sharp navigation paths regardless of device resolution.
 
 ---
 
@@ -27,17 +27,17 @@ NavX is built specifically to showcase the **multimodal** and **reasoning** stre
 
 ## **🛠️ Tech Stack**
 
-* **Frontend:** Next.js 14+ (App Router), Tailwind CSS, Framer Motion.
-* **AI Engine:** Google Gemini 3 (Pro & Flash) via Google GenAI SDK.
-* **Database:** MongoDB (Adjacency list storage for graph nodes).
-* **Algorithm:** Custom Dijkstra’s Algorithm implementation.
-* **Utilities:** Web Speech API (TTS), SWR (API Caching), Lucide React (Icons).
+- **Frontend:** Next.js 14+ (App Router), Tailwind CSS, Framer Motion.
+- **AI Engine:** Google Gemini 3 (Pro & Flash) via Google GenAI SDK.
+- **Database:** Firebase.
+- **Algorithm:** Custom Dijkstra’s Algorithm implementation.
+- **Utilities:** Web Speech API (TTS), SWR (API Caching), Lucide React (Icons).
 
 ---
 
 ## **🏗️ Architecture & Flow**
 
-1. **Digitization:** Image Upload → Gemini 3 (OCR/Spatial) → JSON Nodes → MongoDB.
+1. **Digitization:** Image Upload → Gemini 3 (OCR/Spatial) → JSON Nodes → Firebase.
 2. **Pathfinding:** User Selects Start/End → Dijkstra (Shortest Path) → SVG Path Array.
 3. **Assistant:** Path Array → Gemini 3 (Summarization) → TTS Voice Playback.
 
@@ -47,29 +47,30 @@ NavX is built specifically to showcase the **multimodal** and **reasoning** stre
 
 ### **Prerequisites**
 
-* Node.js 18.x or higher
-* MongoDB Atlas account
-* Google AI Studio API Key (Gemini 3 access)
+- Node.js 18.x or higher
+- Firebase account
+- Google AI Studio API Key (Gemini 3 access)
 
 ### **Setup**
 
 1. **Clone the Repo:**
+
 ```bash
 git clone https://github.com/yourusername/navx-navigation.git
 cd navx-navigation
 
 ```
 
-
 2. **Install Dependencies:**
+
 ```bash
 npm install
 
 ```
 
-
 3. **Environment Variables:**
-Create a `.env.local` file:
+   Create a `.env.local` file:
+
 ```env
 # Firebase Client SDK (Browser-side) - Public variables
 FIREBASE_API_KEY=your_firebase_api_key
@@ -96,22 +97,20 @@ NEXT_PUBLIC_USE_DATABASE=true
 GEMINI_MODEL= gemini-3-flash-preview
 ```
 
-
 4. **Run Development Server:**
+
 ```bash
 npm run dev
 
 ```
 
-
-
 ---
 
 ## **🌍 Potential Impact**
 
-* **Social Good:** Enhances accessibility by providing "stairs-free" routes for users with mobility impairments.
-* **Productivity:** Drastically reduces the time required for facility managers to digitize and maintain building maps.
-* **Wayfinding Anxiety:** Reduces stress for new students, visitors, and patients in large, high-pressure environments like hospitals and universities.
+- **Social Good:** Enhances accessibility by providing "stairs-free" routes for users with mobility impairments.
+- **Productivity:** Drastically reduces the time required for facility managers to digitize and maintain building maps.
+- **Wayfinding Anxiety:** Reduces stress for new students, visitors, and patients in large, high-pressure environments like hospitals and universities.
 
 ---
 
