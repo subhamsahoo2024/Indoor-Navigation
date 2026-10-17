@@ -1,29 +1,29 @@
 import { NextRequest, NextResponse } from "next/server";
-import { db } from "@/lib/firebase";
-import type { MapData } from "@/types/navigation";
+import dbConnect from "@/lib/db";
+import MapModel, { toMongooseAdjacencyList } from "@/models/Map";
 
 /**
  * GET /api/maps
- * Returns metadata for all maps (id, name, imageUrl, nodes count)
+ * Returns metadata for all maps (id, name, imageUrl, mapImage, nodes count)
  */
 export async function GET() {
   try {
-    const mapsCollection = db.collection("maps");
-    const snapshot = await mapsCollection.get();
+    await dbConnect();
 
-    const maps = snapshot.docs.map((doc) => {
-      const data = doc.data();
-      return {
-        id: data.id || doc.id, // Use custom id field, fallback to Firestore document ID
-        name: data.name,
-        imageUrl: data.imageUrl,
-        nodes: data.nodes || [],
-      };
-    });
+    const maps = await MapModel.find(
+      {},
+      "id name imageUrl mapImage nodes",
+    ).lean();
 
     return NextResponse.json({
       success: true,
-      data: maps,
+      data: maps.map((m) => ({
+        id: m.id,
+        name: m.name,
+        imageUrl: m.imageUrl,
+        mapImage: m.mapImage,
+        nodes: m.nodes || [],
+      })),
     });
   } catch (error) {
     console.error("GET /api/maps error:", error);
@@ -32,7 +32,7 @@ export async function GET() {
         success: false,
         error: error instanceof Error ? error.message : "Failed to fetch maps",
       },
-      { status: 500 }
+      { status: 500 },
     );
   }
 }
@@ -40,64 +40,87 @@ export async function GET() {
 /**
  * POST /api/maps
  * Create a new map
- * Input: { id, name, imageUrl, nodes?, adjacencyList? }
+ * Input: { id, name, imageUrl?, mapImage?, nodes?, adjacencyList? }
+ * Either imageUrl (old maps) or mapImage (new maps with Base64) must be provided
  */
 export async function POST(request: NextRequest) {
   try {
-    const body = await request.json();
-    const { id, name, imageUrl, nodes = [], adjacencyList = {} } = body;
+    await dbConnect();
 
-    // Validation
-    if (!id || !name || !imageUrl) {
+    const body = await request.json();
+    const {
+      id,
+      name,
+      imageUrl,
+      mapImage,
+      nodes = [],
+      adjacencyList = {},
+    } = body;
+
+    // Validation - require id, name, and either imageUrl or mapImage
+    if (!id || !name) {
       return NextResponse.json(
         {
           success: false,
-          error: "Missing required fields: id, name, imageUrl",
+          error: "Missing required fields: id, name",
         },
-        { status: 400 }
+        { status: 400 },
       );
     }
 
-    const mapsCollection = db.collection("maps");
+    if (!imageUrl && !mapImage) {
+      return NextResponse.json(
+        {
+          success: false,
+          error: "Either imageUrl or mapImage (Base64) must be provided",
+        },
+        { status: 400 },
+      );
+    }
+
+    // Validate mapImage size if provided (Base64 increases size by ~33%)
+    // Limit to ~12MB of Base64 to stay safely under MongoDB's 16MB document limit
+    if (mapImage && mapImage.length > 12 * 1024 * 1024) {
+      return NextResponse.json(
+        {
+          success: false,
+          error:
+            "mapImage is too large. Maximum size is ~12MB (Base64 encoded)",
+        },
+        { status: 400 },
+      );
+    }
 
     // Check if map with this id already exists
-    const existingDoc = await mapsCollection.doc(id).get();
-    if (existingDoc.exists) {
+    const existingMap = await MapModel.findOne({ id });
+    if (existingMap) {
       return NextResponse.json(
         {
           success: false,
           error: `Map with id '${id}' already exists`,
         },
-        { status: 409 }
+        { status: 409 },
       );
     }
 
-    // Create new map document
-    const newMapData: Partial<MapData> = {
+    // Create new map with either imageUrl or mapImage
+    const newMap = new MapModel({
       id,
       name,
-      imageUrl,
+      ...(imageUrl && { imageUrl }),
+      ...(mapImage && { mapImage }),
       nodes,
-      adjacencyList,
-    };
+      adjacencyList: toMongooseAdjacencyList(adjacencyList),
+    });
 
-    // Add timestamps
-    const timestamp = new Date();
-    const mapWithTimestamps = {
-      ...newMapData,
-      createdAt: timestamp,
-      updatedAt: timestamp,
-    };
-
-    // Use the provided id as the Firestore document ID
-    await mapsCollection.doc(id).set(mapWithTimestamps);
+    await newMap.save();
 
     return NextResponse.json(
       {
         success: true,
-        data: { ...mapWithTimestamps, id },
+        data: newMap.toJSON(),
       },
-      { status: 201 }
+      { status: 201 },
     );
   } catch (error) {
     console.error("POST /api/maps error:", error);
@@ -106,7 +129,7 @@ export async function POST(request: NextRequest) {
         success: false,
         error: error instanceof Error ? error.message : "Failed to create map",
       },
-      { status: 500 }
+      { status: 500 },
     );
   }
 }

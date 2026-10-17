@@ -2,6 +2,8 @@
 
 import { useState, useEffect } from "react";
 import Link from "next/link";
+import { signOut, useSession } from "next-auth/react";
+import imageCompression from "browser-image-compression";
 import {
   Plus,
   Map,
@@ -13,14 +15,22 @@ import {
   Image as ImageIcon,
   Home,
   MapPin,
+  LogOut,
 } from "lucide-react";
 import type { MapData } from "@/types/navigation";
+import PinVerificationModal from "@/components/PinVerificationModal";
+import {
+  fileToBase64,
+  getMapImageSrc,
+  MAX_FILE_SIZE_MB,
+} from "@/lib/imageUtils";
 
 /**
  * Admin Dashboard - Map List Page
  * Displays all maps and allows creating new ones
  */
 export default function AdminPage() {
+  const { data: session } = useSession();
   const [maps, setMaps] = useState<MapData[]>([]);
   const [isLoading, setIsLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
@@ -30,17 +40,17 @@ export default function AdminPage() {
   // New map form state
   const [newMapId, setNewMapId] = useState("");
   const [newMapName, setNewMapName] = useState("");
-  const [newMapImageUrl, setNewMapImageUrl] = useState("");
+  const [newMapImage, setNewMapImage] = useState(""); // Base64 encoded image
 
   // File upload state
   const [isUploading, setIsUploading] = useState(false);
   const [uploadError, setUploadError] = useState<string | null>(null);
   const [selectedFileName, setSelectedFileName] = useState<string | null>(null);
-  const [compressionInfo, setCompressionInfo] = useState<{
-    originalSize: number;
-    compressedSize: number;
-    compressionRatio: string;
-  } | null>(null);
+
+  // PIN verification for delete
+  const [showDeletePinModal, setShowDeletePinModal] = useState(false);
+  const [deletingMapId, setDeletingMapId] = useState<string | null>(null);
+  const [deletingMapName, setDeletingMapName] = useState<string | null>(null);
 
   // Fetch all maps on mount
   useEffect(() => {
@@ -58,7 +68,7 @@ export default function AdminPage() {
       if (result.success) {
         setMaps(result.data);
       } else {
-        setError(result.error || "Failed to fetch maps");
+        setError("Failed to fetch maps");
       }
     } catch (err) {
       setError("Failed to connect to server");
@@ -68,7 +78,7 @@ export default function AdminPage() {
     }
   };
 
-  // Handle file selection and upload
+  // Handle file selection, compress, and convert to Base64
   const handleFileSelect = async (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
     if (!file) return;
@@ -78,36 +88,33 @@ export default function AdminPage() {
     setSelectedFileName(file.name);
 
     try {
-      const formData = new FormData();
-      formData.append("file", file);
+      // Step 1: Compress the image automatically
+      const compressionOptions = {
+        maxSizeMB: 1.0, // Target 1MB or less
+        maxWidthOrHeight: 2500, // Resize large images to 2500px max
+        useWebWorker: true, // Use web worker to prevent UI freeze
+        fileType: "image/webp", // Convert to WebP for better compression
+      };
 
-      const response = await fetch("/api/upload", {
-        method: "POST",
-        body: formData,
-      });
+      const compressedFile = await imageCompression(file, compressionOptions);
 
-      const result = await response.json();
+      // Step 2: Convert compressed file to Base64 using utility function
+      const result = await fileToBase64(compressedFile);
 
       if (result.success) {
-        setNewMapImageUrl(result.data.url);
-        // Store compression info if available
-        if (result.data.compressionRatio) {
-          setCompressionInfo({
-            originalSize: result.data.originalSize,
-            compressedSize: result.data.compressedSize,
-            compressionRatio: result.data.compressionRatio,
-          });
-        }
+        setNewMapImage(result.base64);
       } else {
-        setUploadError(result.error || "Failed to upload file");
+        setUploadError(result.error);
         setSelectedFileName(null);
-        setNewMapImageUrl("");
+        setNewMapImage("");
       }
     } catch (err) {
-      setUploadError("Failed to upload file");
+      setUploadError(
+        err instanceof Error ? err.message : "Failed to process file",
+      );
       setSelectedFileName(null);
-      setNewMapImageUrl("");
-      console.error(err);
+      setNewMapImage("");
+      console.error("Image compression error:", err);
     } finally {
       setIsUploading(false);
     }
@@ -115,16 +122,15 @@ export default function AdminPage() {
 
   // Clear selected file
   const handleClearFile = () => {
-    setNewMapImageUrl("");
+    setNewMapImage("");
     setSelectedFileName(null);
     setUploadError(null);
-    setCompressionInfo(null);
   };
 
   const handleCreateMap = async (e: React.FormEvent) => {
     e.preventDefault();
 
-    if (!newMapId.trim() || !newMapName.trim() || !newMapImageUrl.trim()) {
+    if (!newMapId.trim() || !newMapName.trim() || !newMapImage) {
       return;
     }
 
@@ -137,7 +143,7 @@ export default function AdminPage() {
         body: JSON.stringify({
           id: newMapId.trim().toLowerCase().replace(/\s+/g, "_"),
           name: newMapName.trim(),
-          imageUrl: newMapImageUrl.trim(),
+          mapImage: newMapImage, // Send Base64 image instead of file URL
           nodes: [],
           adjacencyList: {},
         }),
@@ -165,40 +171,46 @@ export default function AdminPage() {
       return;
     }
 
+    // Prompt for PIN
+    setDeletingMapId(mapId);
+    setDeletingMapName(mapName);
+    setShowDeletePinModal(true);
+  };
+
+  const handleDeleteWithPin = async (pin: string) => {
+    setShowDeletePinModal(false);
+
+    if (!deletingMapId) return;
+
     try {
-      const response = await fetch(`/api/maps/${mapId}`, {
+      const response = await fetch(`/api/maps/${deletingMapId}`, {
         method: "DELETE",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ pin }),
       });
 
       const result = await response.json();
 
       if (result.success) {
-        setMaps((prev) => prev.filter((m) => m.id !== mapId));
+        setMaps((prev) => prev.filter((m) => m.id !== deletingMapId));
       } else {
         alert(result.error || "Failed to delete map");
       }
     } catch (err) {
       alert("Failed to delete map");
       console.error(err);
+    } finally {
+      setDeletingMapId(null);
+      setDeletingMapName(null);
     }
   };
 
   const resetForm = () => {
     setNewMapId("");
     setNewMapName("");
-    setNewMapImageUrl("");
+    setNewMapImage("");
     setSelectedFileName(null);
     setUploadError(null);
-    setCompressionInfo(null);
-  };
-
-  // Helper to format file size
-  const formatFileSize = (bytes: number): string => {
-    if (bytes === 0) return "0 Bytes";
-    const k = 1024;
-    const sizes = ["Bytes", "KB", "MB"];
-    const i = Math.floor(Math.log(bytes) / Math.log(k));
-    return parseFloat((bytes / Math.pow(k, i)).toFixed(1)) + " " + sizes[i];
   };
 
   return (
@@ -235,16 +247,31 @@ export default function AdminPage() {
                 </h1>
                 <p className="text-sm text-slate-400">
                   Manage indoor navigation maps
+                  {session?.user?.name && (
+                    <span className="ml-2">
+                      • Logged in as {session.user.name}
+                    </span>
+                  )}
                 </p>
               </div>
             </div>
-            <button
-              onClick={() => setIsModalOpen(true)}
-              className="flex items-center gap-2 px-6 py-3 bg-gradient-to-r from-blue-600 to-cyan-600 text-white rounded-xl hover:shadow-lg hover:shadow-blue-500/50 transition-all duration-300 font-semibold"
-            >
-              <Plus className="w-5 h-5" />
-              Create New Map
-            </button>
+            <div className="flex items-center gap-3">
+              <button
+                onClick={() => setIsModalOpen(true)}
+                className="flex items-center gap-2 px-6 py-3 bg-gradient-to-r from-blue-600 to-cyan-600 text-white rounded-xl hover:shadow-lg hover:shadow-blue-500/50 transition-all duration-300 font-semibold"
+              >
+                <Plus className="w-5 h-5" />
+                Create New Map
+              </button>
+              <button
+                onClick={() => signOut({ callbackUrl: "/login" })}
+                className="flex items-center gap-2 px-4 py-3 bg-white/5 border border-white/10 text-slate-300 rounded-xl hover:bg-red-500/10 hover:border-red-500/30 hover:text-red-400 transition-all duration-300 font-medium"
+                title="Logout"
+              >
+                <LogOut className="w-5 h-5" />
+                Logout
+              </button>
+            </div>
           </div>
         </div>
       </header>
@@ -315,12 +342,15 @@ export default function AdminPage() {
                     <div
                       className="absolute inset-0 bg-cover bg-center"
                       style={{
-                        backgroundImage: map.imageUrl
-                          ? `url(${map.imageUrl})`
+                        backgroundImage: getMapImageSrc(
+                          map.mapImage,
+                          map.imageUrl,
+                        )
+                          ? `url(${getMapImageSrc(map.mapImage, map.imageUrl)})`
                           : undefined,
                       }}
                     >
-                      {!map.imageUrl && (
+                      {!getMapImageSrc(map.mapImage, map.imageUrl) && (
                         <div className="flex items-center justify-center h-full">
                           <Map className="w-8 h-8 text-slate-500" />
                         </div>
@@ -408,7 +438,7 @@ export default function AdminPage() {
                   </label>
 
                   {/* File Upload Area */}
-                  {!newMapImageUrl ? (
+                  {!newMapImage ? (
                     <div className="relative">
                       <input
                         type="file"
@@ -429,7 +459,7 @@ export default function AdminPage() {
                           <div className="flex flex-col items-center">
                             <div className="w-8 h-8 rounded-full border-2 border-transparent border-t-cyan-400 animate-spin mb-2" />
                             <span className="text-sm text-cyan-300">
-                              Uploading {selectedFileName}...
+                              Processing {selectedFileName}...
                             </span>
                           </div>
                         ) : (
@@ -439,7 +469,7 @@ export default function AdminPage() {
                               Click or drag to upload image
                             </span>
                             <span className="text-xs text-slate-500 mt-1">
-                              PNG, JPG, WebP up to 10MB
+                              PNG, JPG, WebP up to {MAX_FILE_SIZE_MB}MB
                             </span>
                           </div>
                         )}
@@ -450,7 +480,7 @@ export default function AdminPage() {
                     <div className="relative border border-white/10 rounded-xl overflow-hidden">
                       <div
                         className="aspect-video bg-gray-900 bg-cover bg-center"
-                        style={{ backgroundImage: `url(${newMapImageUrl})` }}
+                        style={{ backgroundImage: `url(${newMapImage})` }}
                       />
                       <div className="absolute inset-0 bg-black/40 opacity-0 hover:opacity-100 transition-opacity flex items-center justify-center">
                         <button
@@ -462,24 +492,11 @@ export default function AdminPage() {
                           Remove
                         </button>
                       </div>
-                      <div className="p-3 bg-white/5 border-t border-white/10">
-                        <div className="flex items-center gap-2 text-sm text-slate-400">
-                          <ImageIcon className="w-4 h-4" />
-                          <span className="truncate">
-                            {selectedFileName || newMapImageUrl}
-                          </span>
-                        </div>
-                        {compressionInfo && (
-                          <div className="mt-2 flex items-center gap-3 text-xs">
-                            <span className="text-green-400">
-                              ✓ Compressed {compressionInfo.compressionRatio}
-                            </span>
-                            <span className="text-slate-500">
-                              {formatFileSize(compressionInfo.originalSize)} →{" "}
-                              {formatFileSize(compressionInfo.compressedSize)}
-                            </span>
-                          </div>
-                        )}
+                      <div className="p-3 bg-white/5 border-t border-white/10 flex items-center gap-2 text-sm text-slate-400">
+                        <ImageIcon className="w-4 h-4" />
+                        <span className="truncate">
+                          {selectedFileName || "Uploaded image"}
+                        </span>
                       </div>
                     </div>
                   )}
@@ -506,7 +523,7 @@ export default function AdminPage() {
                   </button>
                   <button
                     type="submit"
-                    disabled={isCreating || isUploading || !newMapImageUrl}
+                    disabled={isCreating || isUploading || !newMapImage}
                     className="flex-1 px-4 py-3 bg-gradient-to-r from-blue-600 to-cyan-600 text-white rounded-xl hover:shadow-lg hover:shadow-blue-500/50 transition-all duration-300 disabled:opacity-50 disabled:cursor-not-allowed flex items-center justify-center gap-2 font-medium"
                   >
                     {isCreating && (
@@ -520,6 +537,19 @@ export default function AdminPage() {
           </div>
         </div>
       )}
+
+      {/* PIN Verification Modal for Delete */}
+      <PinVerificationModal
+        isOpen={showDeletePinModal}
+        onClose={() => {
+          setShowDeletePinModal(false);
+          setDeletingMapId(null);
+          setDeletingMapName(null);
+        }}
+        onVerify={handleDeleteWithPin}
+        title="Delete Map"
+        message={`Enter 4-digit PIN to delete "${deletingMapName}"`}
+      />
     </div>
   );
 }

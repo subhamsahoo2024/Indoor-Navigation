@@ -62,23 +62,20 @@ export interface Edge {
 
 /**
  * Complete map data structure containing nodes and their connections
- * IDs are Firestore document IDs (strings)
  */
 export interface MapData {
-  /** Unique identifier for the map (Firestore document ID) */
+  /** Unique identifier for the map */
   id: string;
   /** Human-readable name for the map */
   name: string;
-  /** URL or path to the map image */
-  imageUrl: string;
+  /** URL or path to the map image (for old maps stored in public/) */
+  imageUrl?: string;
+  /** Base64 encoded map image (for new maps stored in MongoDB) */
+  mapImage?: string;
   /** Array of all nodes on this map */
   nodes: Node[];
   /** Adjacency list: NodeID -> Array of connected edges */
   adjacencyList: Record<string, Edge[]>;
-  /** Creation timestamp (optional, from Firestore) */
-  createdAt?: Date | { toDate(): Date };
-  /** Last update timestamp (optional, from Firestore) */
-  updatedAt?: Date | { toDate(): Date };
 }
 
 /**
@@ -114,7 +111,7 @@ export interface GlobalGraph {
  * Validates that the node has type GATEWAY and gatewayConfig with non-empty values
  */
 export function isGatewayNode(
-  node: Node
+  node: Node,
 ): node is Node & { gatewayConfig: GatewayConfig } {
   return (
     node.type === "GATEWAY" &&
@@ -143,4 +140,34 @@ export function isValidNode(node: Node): boolean {
   const gatewayValid =
     node.type !== "GATEWAY" || node.gatewayConfig !== undefined;
   return coordValid && gatewayValid;
+}
+
+/**
+ * Location point representing a specific node on a specific map
+ */
+export interface LocationPoint {
+  mapId: string;
+  nodeId: string;
+}
+
+/**
+ * Navigation state tracking start and end points and navigation status
+ */
+export interface NavigationState {
+  startNode: LocationPoint | null;
+  endNode: LocationPoint | null;
+  isNavigating: boolean;
+}
+
+/**
+ * Butterfly animation object for celebration effects
+ */
+export interface Butterfly {
+  id: number;
+  x: number;
+  y: number;
+  rotation: number;
+  size: number;
+  duration: number;
+  image: string;
 }

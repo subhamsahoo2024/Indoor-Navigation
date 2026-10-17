@@ -17,11 +17,15 @@ import {
   Copy,
   Check,
   Download,
-  Wand2,
+  Eye,
+  ChevronRight,
+  GripVertical,
 } from "lucide-react";
 import { QRCodeSVG } from "qrcode.react";
 import type { MapData, Node, Edge, NodeType } from "@/types/navigation";
 import { useImageDimensions } from "@/hooks/useImageDimensions";
+import PinVerificationModal from "@/components/PinVerificationModal";
+import { getMapImageSrc } from "@/lib/imageUtils";
 
 // ============================================================================
 // Types
@@ -77,10 +81,13 @@ export default function MapEditor({ mapData, onMapUpdate }: MapEditorProps) {
   // Refs
   const containerRef = useRef<HTMLDivElement>(null);
 
+  // Get effective image source (mapImage for new maps, imageUrl for old maps)
+  const effectiveImageSrc = getMapImageSrc(mapData.mapImage, mapData.imageUrl);
+
   // Use the image dimensions hook for accurate coordinate conversion
   const { imageBounds, isReady, toPixels, toPercent } = useImageDimensions(
     containerRef,
-    mapData.imageUrl,
+    effectiveImageSrc,
     "top-left", // background-position: top left
   );
 
@@ -146,13 +153,23 @@ export default function MapEditor({ mapData, onMapUpdate }: MapEditorProps) {
   const [targetMapNodes, setTargetMapNodes] = useState<Node[]>([]);
   const [loadingTargetNodes, setLoadingTargetNodes] = useState(false);
 
-  // Auto-detect state
-  const [isAnalyzing, setIsAnalyzing] = useState(false);
-
   // QR Code URL copy state
   const [qrUrlCopied, setQrUrlCopied] = useState(false);
   const [showQRModal, setShowQRModal] = useState(false);
   const qrCodeRef = useRef<HTMLDivElement>(null);
+
+  // Toggle visibility of nodes and edges
+  const [showNodesAndEdges, setShowNodesAndEdges] = useState(true);
+
+  // Sidebar resize and visibility state
+  const [isSidebarOpen, setIsSidebarOpen] = useState(true);
+  const [sidebarWidth, setSidebarWidth] = useState(320);
+  const [isResizing, setIsResizing] = useState(false);
+  const resizeStartXRef = useRef(0);
+  const startWidthRef = useRef(320);
+
+  // PIN verification for save
+  const [showPinModal, setShowPinModal] = useState(false);
 
   // Fetch available maps for gateway dropdown
   useEffect(() => {
@@ -212,7 +229,7 @@ export default function MapEditor({ mapData, onMapUpdate }: MapEditorProps) {
     if (history.length > 1) {
       setHasUnsavedChanges(true);
     }
-  }, [nodes, adjacencyList]);
+  }, [nodes, adjacencyList, history]);
 
   // Push current state to history
   const pushHistory = useCallback(() => {
@@ -249,6 +266,41 @@ export default function MapEditor({ mapData, onMapUpdate }: MapEditorProps) {
     }
   }, [history, historyIndex]);
 
+  // Sidebar resize handlers
+  const handleResizeMouseDown = useCallback(
+    (e: React.MouseEvent) => {
+      e.preventDefault();
+      setIsResizing(true);
+      resizeStartXRef.current = e.clientX;
+      startWidthRef.current = sidebarWidth;
+    },
+    [sidebarWidth],
+  );
+
+  useEffect(() => {
+    if (!isResizing) return;
+
+    const handleMouseMove = (e: MouseEvent) => {
+      const deltaX = resizeStartXRef.current - e.clientX;
+      const newWidth = startWidthRef.current + deltaX;
+      // Constrain between 250px and 600px
+      const constrainedWidth = Math.max(250, Math.min(600, newWidth));
+      setSidebarWidth(constrainedWidth);
+    };
+
+    const handleMouseUp = () => {
+      setIsResizing(false);
+    };
+
+    window.addEventListener("mousemove", handleMouseMove);
+    window.addEventListener("mouseup", handleMouseUp);
+
+    return () => {
+      window.removeEventListener("mousemove", handleMouseMove);
+      window.removeEventListener("mouseup", handleMouseUp);
+    };
+  }, [isResizing]);
+
   // Handle canvas double-click to add node
   const handleCanvasDoubleClick = useCallback(
     (e: React.MouseEvent) => {
@@ -269,6 +321,7 @@ export default function MapEditor({ mapData, onMapUpdate }: MapEditorProps) {
       setAdjacencyList((prev) => ({ ...prev, [newNode.id]: [] }));
       setSelectedNodeId(newNode.id);
       setEditingNode(newNode);
+      setIsSidebarOpen(true); // Auto-open properties panel when node is created
 
       setTimeout(() => pushHistory(), 0);
     },
@@ -292,6 +345,7 @@ export default function MapEditor({ mapData, onMapUpdate }: MapEditorProps) {
       } else {
         setSelectedNodeId(node.id);
         setEditingNode(node);
+        setIsSidebarOpen(true); // Auto-open properties panel when node is clicked
       }
     },
     [mode, connectSourceId],
@@ -430,8 +484,14 @@ export default function MapEditor({ mapData, onMapUpdate }: MapEditorProps) {
     [editingNode],
   );
 
-  // Save changes
-  const handleSave = async () => {
+  // Save changes - prompt for PIN
+  const handleSave = () => {
+    setShowPinModal(true);
+  };
+
+  // Perform save after PIN verification
+  const handleSaveWithPin = async (pin: string) => {
+    setShowPinModal(false);
     setIsSaving(true);
 
     try {
@@ -444,7 +504,7 @@ export default function MapEditor({ mapData, onMapUpdate }: MapEditorProps) {
       const response = await fetch(`/api/maps/${mapData.id}`, {
         method: "PUT",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify(updatedMapData),
+        body: JSON.stringify({ ...updatedMapData, pin }),
       });
 
       const result = await response.json();
@@ -588,133 +648,6 @@ export default function MapEditor({ mapData, onMapUpdate }: MapEditorProps) {
     img.src = svgUrl;
   }, [selectedNode, mapData.name]);
 
-  // Handle Auto-Detect Nodes
-  const handleAutoDetect = async () => {
-    if (!mapData.imageUrl || isAnalyzing) return;
-
-    const confirmAnalysis = window.confirm(
-      "This will use AI to detect rooms and POIs in the map image. It might take a few seconds.\n\nExisting nodes will be preserved.\n\nContinue?",
-    );
-
-    if (!confirmAnalysis) return;
-
-    setIsAnalyzing(true);
-
-    try {
-      // 1. Convert image URL to Base64
-      let base64Image = "";
-      try {
-        const response = await fetch(mapData.imageUrl);
-        const blob = await response.blob();
-        base64Image = await new Promise<string>((resolve, reject) => {
-          const reader = new FileReader();
-          reader.onloadend = () => resolve(reader.result as string);
-          reader.onerror = reject;
-          reader.readAsDataURL(blob);
-        });
-      } catch (err) {
-        console.error("Failed to fetch/convert image:", err);
-        alert(
-          "Failed to access map image for analysis. Please check if CORS is configured if using external URLs.",
-        );
-        setIsAnalyzing(false);
-        return;
-      }
-
-      // 2. Call Analyze API
-      const response = await fetch("/api/admin/analyze-map", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ image: base64Image }),
-      });
-
-      const result = await response.json();
-
-      if (!result.success) {
-        throw new Error(result.error || "Analysis failed");
-      }
-
-      // 3. Process Result
-      const detectedItems = result.data;
-      if (!Array.isArray(detectedItems) || detectedItems.length === 0) {
-        alert(
-          "AI finished analysis but didn't find any clear rooms or labels.",
-        );
-        return;
-      }
-
-      // 4. Create new nodes
-      const newNodes: Node[] = detectedItems.map((item: any) => ({
-        id: generateNodeId(), // Helper from existing code
-        name: item.label || "Detected Room",
-        x: Math.max(0, Math.min(100, item.x ?? 50)),
-        y: Math.max(0, Math.min(100, item.y ?? 50)),
-        type: "ROOM", // Default to ROOM type
-        description: "Auto-detected by AI",
-      }));
-
-      // 5. Update state
-      setNodes((prev) => [...prev, ...newNodes]);
-      setAdjacencyList((prev) => {
-        const updated = { ...prev };
-        newNodes.forEach((node) => {
-          updated[node.id] = [];
-        });
-        return updated;
-      });
-
-      // 6. Push history and notify
-      setTimeout(() => pushHistory(), 100);
-
-      // 7. Auto-save the detected nodes
-      setTimeout(async () => {
-        try {
-          const updatedMapData: MapData = {
-            ...mapData,
-            nodes: [...nodes, ...newNodes],
-            adjacencyList: {
-              ...adjacencyList,
-              ...Object.fromEntries(newNodes.map((node) => [node.id, []])),
-            },
-          };
-
-          const response = await fetch(`/api/maps/${mapData.id}`, {
-            method: "PUT",
-            headers: { "Content-Type": "application/json" },
-            body: JSON.stringify(updatedMapData),
-          });
-
-          const result = await response.json();
-
-          if (result.success) {
-            onMapUpdate(result.data);
-            setHasUnsavedChanges(false);
-            alert(
-              `Successfully detected, added, and saved ${newNodes.length} nodes!`,
-            );
-          } else {
-            alert(
-              `Detected ${newNodes.length} nodes but failed to save: ${result.error || "Unknown error"}. Please save manually.`,
-            );
-          }
-        } catch (saveErr) {
-          console.error("Auto-save error:", saveErr);
-          alert(
-            `Detected ${newNodes.length} nodes but failed to save. Please save manually.`,
-          );
-        }
-      }, 200);
-    } catch (err) {
-      console.error("Auto-detect error:", err);
-      alert(
-        "Failed to analyze map. " +
-          (err instanceof Error ? err.message : "Unknown error"),
-      );
-    } finally {
-      setIsAnalyzing(false);
-    }
-  };
-
   return (
     <div className="flex-1 flex overflow-hidden">
       {/* Toolbar */}
@@ -725,41 +658,30 @@ export default function MapEditor({ mapData, onMapUpdate }: MapEditorProps) {
             setMode("select");
             setConnectSourceId(null);
           }}
+          disabled={!showNodesAndEdges}
           className={`p-3 rounded-lg transition-colors ${
-            mode === "select"
-              ? "bg-blue-100 text-blue-600"
-              : "hover:bg-gray-100 text-gray-600"
+            !showNodesAndEdges
+              ? "opacity-50 cursor-not-allowed text-gray-400"
+              : mode === "select"
+                ? "bg-blue-100 text-blue-600"
+                : "hover:bg-gray-100 text-gray-600"
           }`}
           title="Select & Move (S)"
         >
           <Circle className="w-5 h-5" />
-        </button>
-
-        <button
-          onClick={handleAutoDetect}
-          disabled={isAnalyzing || !mapData.imageUrl}
-          className={`p-3 rounded-lg transition-colors ${
-            isAnalyzing
-              ? "bg-purple-100 text-purple-600 animate-pulse"
-              : "hover:bg-purple-50 text-purple-600"
-          } disabled:opacity-50 disabled:cursor-not-allowed`}
-          title="Auto-Detect Nodes with AI"
-        >
-          {isAnalyzing ? (
-            <Loader2 className="w-5 h-5 animate-spin" />
-          ) : (
-            <Wand2 className="w-5 h-5" />
-          )}
         </button>
         <button
           onClick={() => {
             setMode("add");
             setConnectSourceId(null);
           }}
+          disabled={!showNodesAndEdges}
           className={`p-3 rounded-lg transition-colors ${
-            mode === "add"
-              ? "bg-green-100 text-green-600"
-              : "hover:bg-gray-100 text-gray-600"
+            !showNodesAndEdges
+              ? "opacity-50 cursor-not-allowed text-gray-400"
+              : mode === "add"
+                ? "bg-green-100 text-green-600"
+                : "hover:bg-gray-100 text-gray-600"
           }`}
           title="Add Node (A) - Double-click to place"
         >
@@ -770,14 +692,36 @@ export default function MapEditor({ mapData, onMapUpdate }: MapEditorProps) {
             setMode("connect");
             setConnectSourceId(null);
           }}
+          disabled={!showNodesAndEdges}
           className={`p-3 rounded-lg transition-colors ${
-            mode === "connect"
-              ? "bg-purple-100 text-purple-600"
-              : "hover:bg-gray-100 text-gray-600"
+            !showNodesAndEdges
+              ? "opacity-50 cursor-not-allowed text-gray-400"
+              : mode === "connect"
+                ? "bg-purple-100 text-purple-600"
+                : "hover:bg-gray-100 text-gray-600"
           }`}
           title="Connect Nodes (C) - Click two nodes"
         >
           <LinkIcon className="w-5 h-5" />
+        </button>
+
+        <div className="border-t w-8 my-2" />
+
+        {/* Show/Hide Nodes and Edges */}
+        <button
+          onClick={() => setShowNodesAndEdges(!showNodesAndEdges)}
+          className={`p-3 rounded-lg transition-colors ${
+            showNodesAndEdges
+              ? "bg-indigo-100 text-indigo-600"
+              : "bg-gray-100 text-gray-600 hover:bg-gray-200"
+          }`}
+          title={
+            showNodesAndEdges ? "Hide Nodes & Edges" : "Show Nodes & Edges"
+          }
+        >
+          <Eye
+            className={`w-5 h-5 ${!showNodesAndEdges ? "opacity-50" : ""}`}
+          />
         </button>
 
         <div className="border-t w-8 my-2" />
@@ -843,8 +787,8 @@ export default function MapEditor({ mapData, onMapUpdate }: MapEditorProps) {
             minHeight: "800px",
             width: "max-content",
             height: "max-content",
-            backgroundImage: mapData.imageUrl
-              ? `url(${mapData.imageUrl})`
+            backgroundImage: effectiveImageSrc
+              ? `url(${effectiveImageSrc})`
               : undefined,
             backgroundSize: "contain",
             backgroundRepeat: "no-repeat",
@@ -856,7 +800,7 @@ export default function MapEditor({ mapData, onMapUpdate }: MapEditorProps) {
           onMouseLeave={handleMouseUp}
         >
           {/* No Image Placeholder */}
-          {!mapData.imageUrl && (
+          {!effectiveImageSrc && (
             <div className="absolute inset-0 flex items-center justify-center text-gray-400">
               <div className="text-center">
                 <MapPin className="w-16 h-16 mx-auto mb-2 opacity-30" />
@@ -884,7 +828,7 @@ export default function MapEditor({ mapData, onMapUpdate }: MapEditorProps) {
           )}
 
           {/* SVG Overlay - positioned over the actual rendered image */}
-          {isReady && (
+          {isReady && showNodesAndEdges && (
             <svg
               className="absolute pointer-events-none"
               style={{
@@ -957,6 +901,7 @@ export default function MapEditor({ mapData, onMapUpdate }: MapEditorProps) {
 
           {/* Nodes */}
           {isReady &&
+            showNodesAndEdges &&
             nodes.map((node) => {
               const pos = toPixels(node.x, node.y);
               const isSelected = node.id === selectedNodeId;
@@ -991,14 +936,14 @@ export default function MapEditor({ mapData, onMapUpdate }: MapEditorProps) {
 
                   {/* Node circle */}
                   <div
-                    className="w-8 h-8 rounded-full flex items-center justify-center shadow-md border-2 border-white"
+                    className="w-6 h-6 rounded-full flex items-center justify-center shadow-md border-2 border-white"
                     style={{ backgroundColor: getNodeColor(node.type) }}
                   >
                     <NodeIcon className="w-4 h-4 text-white" />
                   </div>
 
                   {/* Label */}
-                  <div className="absolute top-full left-1/2 transform -translate-x-1/2 mt-1 px-2 py-0.5 bg-white/90 rounded text-xs font-medium whitespace-nowrap shadow text-black">
+                  <div className="absolute top-full left-1/2 transform -translate-x-1/2 mt-1 px-2 py-0.5 bg-white/80 rounded text-xs font-medium whitespace-nowrap shadow text-black">
                     {node.name}
                   </div>
                 </div>
@@ -1008,325 +953,374 @@ export default function MapEditor({ mapData, onMapUpdate }: MapEditorProps) {
       </div>
 
       {/* Properties Sidebar */}
-      <div className="w-80 bg-white border-l flex flex-col">
-        <div className="p-4 border-b">
-          <h3 className="font-semibold text-gray-900">Node Properties</h3>
-        </div>
-
-        {editingNode ? (
-          <div className="flex-1 p-4 space-y-4 overflow-auto">
-            {/* Node ID */}
-            <div>
-              <label className="block text-xs font-medium text-gray-500 mb-1">
-                Node ID
-              </label>
-              <input
-                type="text"
-                value={editingNode.id}
-                disabled
-                className="w-full px-3 py-2 bg-gray-50 border rounded-lg text-sm text-gray-500"
-              />
+      {isSidebarOpen && (
+        <div
+          className="bg-white border-l flex flex-col relative"
+          style={{ width: `${sidebarWidth}px` }}
+        >
+          {/* Resize Handle */}
+          <div
+            className="absolute left-0 top-0 bottom-0 w-1 cursor-col-resize hover:bg-blue-500 transition-colors z-50 group"
+            onMouseDown={handleResizeMouseDown}
+            style={{
+              backgroundColor: isResizing ? "#3b82f6" : "transparent",
+            }}
+          >
+            <div className="absolute left-1/2 top-1/2 -translate-x-1/2 -translate-y-1/2 opacity-0 group-hover:opacity-100 transition-opacity">
+              <GripVertical className="w-4 h-4 text-gray-400" />
             </div>
+          </div>
 
-            {/* Name */}
-            <div>
-              <label className="block text-xs font-medium text-gray-500 mb-1">
-                Name
-              </label>
-              <input
-                type="text"
-                value={editingNode.name}
-                onChange={(e) => updateNode({ name: e.target.value })}
-                onBlur={() => pushHistory()}
-                className="w-full px-3 py-2 border rounded-lg text-sm focus:ring-2 focus:ring-blue-500 focus:border-blue-500 text-black"
-              />
-            </div>
+          <div className="p-4 border-b flex items-center justify-between">
+            <h3 className="font-semibold text-gray-900">Node Properties</h3>
+            <button
+              onClick={() => setIsSidebarOpen(false)}
+              className="p-1 hover:bg-gray-100 rounded-lg transition-colors"
+              title="Close properties panel"
+            >
+              <X className="w-5 h-5 text-gray-500 hover:text-gray-700" />
+            </button>
+          </div>
 
-            {/* Type */}
-            <div>
-              <label className="block text-xs font-medium text-gray-500 mb-1">
-                Type
-              </label>
-              <select
-                value={editingNode.type}
-                onChange={(e) => {
-                  const newType = e.target.value as NodeType;
-                  updateNode({
-                    type: newType,
-                    gatewayConfig:
-                      newType === "GATEWAY"
-                        ? { targetMapId: "", targetNodeId: "" }
-                        : undefined,
-                  });
-                  pushHistory();
-                }}
-                className="w-full px-3 py-2 border rounded-lg text-sm focus:ring-2 focus:ring-blue-500 focus:border-blue-500 text-black"
-              >
-                <option value="NORMAL">Normal</option>
-                <option value="ROOM">Room</option>
-                <option value="GATEWAY">Gateway</option>
-              </select>
-            </div>
+          {editingNode ? (
+            <div className="flex-1 p-4 space-y-4 overflow-auto">
+              {/* Node ID */}
+              <div>
+                <label className="block text-xs font-medium text-gray-500 mb-1">
+                  Node ID
+                </label>
+                <input
+                  type="text"
+                  value={editingNode.id}
+                  disabled
+                  className="w-full px-3 py-2 bg-gray-50 border rounded-lg text-sm text-gray-500"
+                />
+              </div>
 
-            {/* Category / Type */}
-            <div>
-              <label className="block text-xs font-medium text-gray-500 mb-1">
-                Category / Type
-              </label>
-              <select
-                value={editingNode.category || "none"}
-                onChange={(e) => {
-                  updateNode({ category: e.target.value });
-                  pushHistory();
-                }}
-                className="w-full px-3 py-2 border rounded-lg text-sm focus:ring-2 focus:ring-blue-500 focus:border-blue-500 text-black"
-              >
-                <option value="none">None (Default)</option>
-                <option value="canteen">Canteen</option>
-                <option value="library">Library</option>
-                <option value="medical">Medical</option>
-                <option value="restroom_men">Restroom (Men)</option>
-                <option value="restroom_women">Restroom (Women)</option>
-                <option value="staff_room">Staff Room</option>
-                <option value="office_principal">Office - Principal</option>
-                <option value="office_chairman">Office - Chairman</option>
-                <option value="parking">Parking</option>
-                <option value="staff_room">Staff Room</option>
-                <option value="accounts">Accounts</option>
-                <option value="ground">Ground</option>
-                <option value="office_hod_cse">Office - HOD CSE</option>
-                <option value="office_hod_ece">Office - HOD ECE</option>
-                <option value="office_hod_mech">Office - HOD Mechanical</option>
-                <option value="office_hod_civil">Office - HOD Civil</option>
-                <option value="office_hod_it">Office - HOD IT</option>
-                <option value="office_hod_aiml">Office - HOD AIML</option>
-                <option value="office_hod_aids">Office - HOD AIDS</option>
-                <option value="ground">Ground (Playground/Gym)</option>
-                <option value="gate">Gate (Main Entrance/Exit)</option>
-                <option value="gym">Gym</option>
-                <option value="auditorium_kaveri">Kaveri Auditorium</option>
-                <option value="auditorium_parthasarathy">
-                  Parthasarathy Auditorium
-                </option>
-                <option value="drinking_water">Drinking Water</option>
-                <option value="computer_lab">Computer lab</option>
-              </select>
-            </div>
+              {/* Name */}
+              <div>
+                <label className="block text-xs font-medium text-gray-500 mb-1">
+                  Name
+                </label>
+                <input
+                  type="text"
+                  value={editingNode.name}
+                  onChange={(e) => updateNode({ name: e.target.value })}
+                  onBlur={() => pushHistory()}
+                  className="w-full px-3 py-2 border rounded-lg text-sm focus:ring-2 focus:ring-blue-500 focus:border-blue-500 text-black"
+                />
+              </div>
 
-            {/* Gateway Config */}
-            {editingNode.type === "GATEWAY" && (
-              <div className="p-3 bg-amber-50 border border-amber-200 rounded-lg space-y-3">
-                <h4 className="text-sm font-medium text-amber-800">
-                  Gateway Configuration
-                </h4>
+              {/* Type */}
+              <div>
+                <label className="block text-xs font-medium text-gray-500 mb-1">
+                  Type
+                </label>
+                <select
+                  value={editingNode.type}
+                  onChange={(e) => {
+                    const newType = e.target.value as NodeType;
+                    updateNode({
+                      type: newType,
+                      gatewayConfig:
+                        newType === "GATEWAY"
+                          ? { targetMapId: "", targetNodeId: "" }
+                          : undefined,
+                    });
+                    pushHistory();
+                  }}
+                  className="w-full px-3 py-2 border rounded-lg text-sm focus:ring-2 focus:ring-blue-500 focus:border-blue-500 text-black"
+                >
+                  <option value="NORMAL">Normal</option>
+                  <option value="ROOM">Room</option>
+                  <option value="GATEWAY">Gateway</option>
+                </select>
+              </div>
 
-                <div>
-                  <label className="block text-xs font-medium text-gray-500 mb-1">
-                    Target Map
-                  </label>
-                  <select
-                    value={editingNode.gatewayConfig?.targetMapId || ""}
-                    onChange={(e) => {
-                      updateNode({
-                        gatewayConfig: {
-                          targetMapId: e.target.value,
-                          targetNodeId:
-                            editingNode.gatewayConfig?.targetNodeId || "",
-                        },
-                      });
-                      pushHistory();
-                    }}
-                    className="w-full px-3 py-2 border rounded-lg text-sm focus:ring-2 focus:ring-amber-500 focus:border-amber-500 text-black"
-                  >
-                    <option value="">Select target map...</option>
-                    {availableMaps.map((map) => (
-                      <option key={map.id} value={map.id}>
-                        {map.name}
-                      </option>
-                    ))}
-                  </select>
-                </div>
+              {/* Category / Type */}
+              <div>
+                <label className="block text-xs font-medium text-gray-500 mb-1">
+                  Category / Type
+                </label>
+                <select
+                  value={editingNode.category || "none"}
+                  onChange={(e) => {
+                    updateNode({ category: e.target.value });
+                    pushHistory();
+                  }}
+                  className="w-full px-3 py-2 border rounded-lg text-sm focus:ring-2 focus:ring-blue-500 focus:border-blue-500 text-black"
+                >
+                  <option value="none">None (Default)</option>
+                  <option value="canteen">Canteen</option>
+                  <option value="library">Library</option>
+                  <option value="medical">Medical</option>
+                  <option value="restroom_men">Restroom (Men)</option>
+                  <option value="restroom_women">Restroom (Women)</option>
+                  <option value="staff_room">Staff Room</option>
+                  <option value="office_principal">Office - Principal</option>
+                  <option value="office_chairman">Office - Chairman</option>
+                  <option value="parking">Parking</option>
+                  <option value="staff_room">Staff Room</option>
+                  <option value="accounts">Accounts</option>
+                  <option value="ground">Ground</option>
+                  <option value="office_hod_cse">Office - HOD CSE</option>
+                  <option value="office_hod_ece">Office - HOD ECE</option>
+                  <option value="office_hod_mech">
+                    Office - HOD Mechanical
+                  </option>
+                  <option value="office_hod_civil">Office - HOD Civil</option>
+                  <option value="office_hod_it">Office - HOD IT</option>
+                  <option value="office_hod_aiml">Office - HOD AIML</option>
+                  <option value="office_hod_aids">Office - HOD AIDS</option>
+                  <option value="ground">Ground (Playground/Gym)</option>
+                  <option value="gate">Gate (Main Entrance/Exit)</option>
+                  <option value="gym">Gym</option>
+                  <option value="auditorium_kaveri">Kaveri Auditorium</option>
+                  <option value="auditorium_parthasarathy">
+                    Parthasarathy Auditorium
+                  </option>
+                  <option value="drinking_water">Drinking Water</option>
+                  <option value="computer_lab">Computer lab</option>
+                </select>
+              </div>
 
-                <div>
-                  <label className="block text-xs font-medium text-gray-500 mb-1">
-                    Target Node
-                  </label>
-                  {loadingTargetNodes ? (
-                    <div className="w-full px-3 py-2 border rounded-lg text-sm bg-gray-50 text-gray-400">
-                      Loading nodes...
-                    </div>
-                  ) : targetMapNodes.length > 0 ? (
+              {/* Gateway Config */}
+              {editingNode.type === "GATEWAY" && (
+                <div className="p-3 bg-amber-50 border border-amber-200 rounded-lg space-y-3">
+                  <h4 className="text-sm font-medium text-amber-800">
+                    Gateway Configuration
+                  </h4>
+
+                  <div>
+                    <label className="block text-xs font-medium text-gray-500 mb-1">
+                      Target Map
+                    </label>
                     <select
-                      value={editingNode.gatewayConfig?.targetNodeId || ""}
+                      value={editingNode.gatewayConfig?.targetMapId || ""}
                       onChange={(e) => {
                         updateNode({
                           gatewayConfig: {
-                            targetMapId:
-                              editingNode.gatewayConfig?.targetMapId || "",
-                            targetNodeId: e.target.value,
+                            targetMapId: e.target.value,
+                            targetNodeId:
+                              editingNode.gatewayConfig?.targetNodeId || "",
                           },
                         });
                         pushHistory();
                       }}
                       className="w-full px-3 py-2 border rounded-lg text-sm focus:ring-2 focus:ring-amber-500 focus:border-amber-500 text-black"
                     >
-                      <option value="">Select target node...</option>
-                      {targetMapNodes.map((node) => (
-                        <option key={node.id} value={node.id}>
-                          {node.name} ({node.type})
+                      <option value="">Select target map...</option>
+                      {availableMaps.map((map) => (
+                        <option key={map.id} value={map.id}>
+                          {map.name}
                         </option>
                       ))}
                     </select>
+                  </div>
+
+                  <div>
+                    <label className="block text-xs font-medium text-gray-500 mb-1">
+                      Target Node
+                    </label>
+                    {loadingTargetNodes ? (
+                      <div className="w-full px-3 py-2 border rounded-lg text-sm bg-gray-50 text-gray-400">
+                        Loading nodes...
+                      </div>
+                    ) : targetMapNodes.length > 0 ? (
+                      <select
+                        value={editingNode.gatewayConfig?.targetNodeId || ""}
+                        onChange={(e) => {
+                          updateNode({
+                            gatewayConfig: {
+                              targetMapId:
+                                editingNode.gatewayConfig?.targetMapId || "",
+                              targetNodeId: e.target.value,
+                            },
+                          });
+                          pushHistory();
+                        }}
+                        className="w-full px-3 py-2 border rounded-lg text-sm focus:ring-2 focus:ring-amber-500 focus:border-amber-500 text-black"
+                      >
+                        <option value="">Select target node...</option>
+                        {targetMapNodes.map((node) => (
+                          <option key={node.id} value={node.id}>
+                            {node.name} ({node.type})
+                          </option>
+                        ))}
+                      </select>
+                    ) : (
+                      <div className="w-full px-3 py-2 border rounded-lg text-sm bg-gray-50 text-gray-400">
+                        {editingNode.gatewayConfig?.targetMapId
+                          ? "No nodes in target map"
+                          : "Select a target map first"}
+                      </div>
+                    )}
+                  </div>
+                </div>
+              )}
+
+              {/* Coordinates */}
+              <div className="grid grid-cols-2 gap-3">
+                <div>
+                  <label className="block text-xs font-medium text-gray-500 mb-1">
+                    X (%)
+                  </label>
+                  <input
+                    type="number"
+                    value={editingNode.x}
+                    onChange={(e) =>
+                      updateNode({
+                        x: Math.max(
+                          0,
+                          Math.min(100, parseFloat(e.target.value)),
+                        ),
+                      })
+                    }
+                    onBlur={() => pushHistory()}
+                    min={0}
+                    max={100}
+                    step={0.1}
+                    className="w-full px-3 py-2 border rounded-lg text-sm focus:ring-2 focus:ring-blue-500 focus:border-blue-500 text-black"
+                  />
+                </div>
+                <div>
+                  <label className="block text-xs font-medium text-gray-500 mb-1">
+                    Y (%)
+                  </label>
+                  <input
+                    type="number"
+                    value={editingNode.y}
+                    onChange={(e) =>
+                      updateNode({
+                        y: Math.max(
+                          0,
+                          Math.min(100, parseFloat(e.target.value)),
+                        ),
+                      })
+                    }
+                    onBlur={() => pushHistory()}
+                    min={0}
+                    max={100}
+                    step={0.1}
+                    className="w-full px-3 py-2 border rounded-lg text-sm focus:ring-2 focus:ring-blue-500 focus:border-blue-500 text-black"
+                  />
+                </div>
+              </div>
+
+              {/* Description */}
+              <div>
+                <label className="block text-xs font-medium text-gray-500 mb-1">
+                  Description (optional)
+                </label>
+                <textarea
+                  value={editingNode.description || ""}
+                  onChange={(e) => updateNode({ description: e.target.value })}
+                  onBlur={() => pushHistory()}
+                  rows={2}
+                  className="w-full px-3 py-2 border rounded-lg text-sm focus:ring-2 focus:ring-blue-500 focus:border-blue-500 resize-none text-black"
+                  placeholder="Additional info about this node..."
+                />
+              </div>
+
+              {/* QR Code Generator */}
+              <div className="p-3 bg-gradient-to-br from-blue-50 to-indigo-50 border border-blue-200 rounded-lg space-y-3">
+                <div className="flex items-center gap-2">
+                  <QrCode className="w-4 h-4 text-blue-600" />
+                  <h4 className="text-sm font-medium text-blue-800">
+                    QR Code for This Location
+                  </h4>
+                </div>
+
+                <p className="text-xs text-gray-600">
+                  Generate a scannable QR code that opens the navigation app
+                  with this location pre-selected as the starting point.
+                </p>
+
+                <button
+                  onClick={() => setShowQRModal(true)}
+                  className="w-full px-4 py-2.5 bg-blue-600 hover:bg-blue-700 text-white rounded-lg transition-colors flex items-center justify-center gap-2 text-sm font-medium"
+                >
+                  <QrCode className="w-4 h-4" />
+                  Generate QR Code
+                </button>
+              </div>
+
+              {/* Connections */}
+              <div>
+                <label className="block text-xs font-medium text-gray-500 mb-2">
+                  Connected To
+                </label>
+                <div className="space-y-1">
+                  {(adjacencyList[editingNode.id] || []).length === 0 ? (
+                    <p className="text-sm text-gray-400 italic">
+                      No connections
+                    </p>
                   ) : (
-                    <div className="w-full px-3 py-2 border rounded-lg text-sm bg-gray-50 text-gray-400">
-                      {editingNode.gatewayConfig?.targetMapId
-                        ? "No nodes in target map"
-                        : "Select a target map first"}
-                    </div>
+                    (adjacencyList[editingNode.id] || []).map((edge) => {
+                      const targetNode = nodes.find(
+                        (n) => n.id === edge.targetNodeId,
+                      );
+                      return (
+                        <div
+                          key={edge.targetNodeId}
+                          className="flex items-center justify-between px-2 py-1 bg-gray-50 rounded text-sm text-black"
+                        >
+                          <span>{targetNode?.name || edge.targetNodeId}</span>
+                          <span className="text-gray-400">
+                            w: {edge.weight}
+                          </span>
+                        </div>
+                      );
+                    })
                   )}
                 </div>
               </div>
-            )}
 
-            {/* Coordinates */}
-            <div className="grid grid-cols-2 gap-3">
-              <div>
-                <label className="block text-xs font-medium text-gray-500 mb-1">
-                  X (%)
-                </label>
-                <input
-                  type="number"
-                  value={editingNode.x}
-                  onChange={(e) =>
-                    updateNode({
-                      x: Math.max(0, Math.min(100, parseFloat(e.target.value))),
-                    })
-                  }
-                  onBlur={() => pushHistory()}
-                  min={0}
-                  max={100}
-                  step={0.1}
-                  className="w-full px-3 py-2 border rounded-lg text-sm focus:ring-2 focus:ring-blue-500 focus:border-blue-500 text-black"
-                />
-              </div>
-              <div>
-                <label className="block text-xs font-medium text-gray-500 mb-1">
-                  Y (%)
-                </label>
-                <input
-                  type="number"
-                  value={editingNode.y}
-                  onChange={(e) =>
-                    updateNode({
-                      y: Math.max(0, Math.min(100, parseFloat(e.target.value))),
-                    })
-                  }
-                  onBlur={() => pushHistory()}
-                  min={0}
-                  max={100}
-                  step={0.1}
-                  className="w-full px-3 py-2 border rounded-lg text-sm focus:ring-2 focus:ring-blue-500 focus:border-blue-500 text-black"
-                />
-              </div>
-            </div>
-
-            {/* Description */}
-            <div>
-              <label className="block text-xs font-medium text-gray-500 mb-1">
-                Description (optional)
-              </label>
-              <textarea
-                value={editingNode.description || ""}
-                onChange={(e) => updateNode({ description: e.target.value })}
-                onBlur={() => pushHistory()}
-                rows={2}
-                className="w-full px-3 py-2 border rounded-lg text-sm focus:ring-2 focus:ring-blue-500 focus:border-blue-500 resize-none text-black"
-                placeholder="Additional info about this node..."
-              />
-            </div>
-
-            {/* QR Code Generator */}
-            <div className="p-3 bg-gradient-to-br from-blue-50 to-indigo-50 border border-blue-200 rounded-lg space-y-3">
-              <div className="flex items-center gap-2">
-                <QrCode className="w-4 h-4 text-blue-600" />
-                <h4 className="text-sm font-medium text-blue-800">
-                  QR Code for This Location
-                </h4>
-              </div>
-
-              <p className="text-xs text-gray-600">
-                Generate a scannable QR code that opens the navigation app with
-                this location pre-selected as the starting point.
-              </p>
-
+              {/* Delete button */}
               <button
-                onClick={() => setShowQRModal(true)}
-                className="w-full px-4 py-2.5 bg-blue-600 hover:bg-blue-700 text-white rounded-lg transition-colors flex items-center justify-center gap-2 text-sm font-medium"
+                onClick={handleDeleteNode}
+                className="w-full flex items-center justify-center gap-2 px-4 py-2 bg-red-50 text-red-600 rounded-lg hover:bg-red-100 transition-colors"
               >
-                <QrCode className="w-4 h-4" />
-                Generate QR Code
+                <Trash2 className="w-4 h-4" />
+                Delete Node
               </button>
             </div>
-
-            {/* Connections */}
-            <div>
-              <label className="block text-xs font-medium text-gray-500 mb-2">
-                Connected To
-              </label>
-              <div className="space-y-1">
-                {(adjacencyList[editingNode.id] || []).length === 0 ? (
-                  <p className="text-sm text-gray-400 italic">No connections</p>
-                ) : (
-                  (adjacencyList[editingNode.id] || []).map((edge) => {
-                    const targetNode = nodes.find(
-                      (n) => n.id === edge.targetNodeId,
-                    );
-                    return (
-                      <div
-                        key={edge.targetNodeId}
-                        className="flex items-center justify-between px-2 py-1 bg-gray-50 rounded text-sm text-black"
-                      >
-                        <span>{targetNode?.name || edge.targetNodeId}</span>
-                        <span className="text-gray-400">w: {edge.weight}</span>
-                      </div>
-                    );
-                  })
-                )}
+          ) : (
+            <div className="flex-1 flex items-center justify-center p-8 text-center text-gray-400">
+              <div>
+                <MapPin className="w-12 h-12 mx-auto mb-3 opacity-30" />
+                <p>Select a node to edit its properties</p>
               </div>
             </div>
+          )}
 
-            {/* Delete button */}
-            <button
-              onClick={handleDeleteNode}
-              className="w-full flex items-center justify-center gap-2 px-4 py-2 bg-red-50 text-red-600 rounded-lg hover:bg-red-100 transition-colors"
-            >
-              <Trash2 className="w-4 h-4" />
-              Delete Node
-            </button>
-          </div>
-        ) : (
-          <div className="flex-1 flex items-center justify-center p-8 text-center text-gray-400">
-            <div>
-              <MapPin className="w-12 h-12 mx-auto mb-3 opacity-30" />
-              <p>Select a node to edit its properties</p>
+          {/* Stats footer */}
+          <div className="p-4 border-t bg-gray-50 text-xs text-gray-500">
+            <div className="flex justify-between">
+              <span>{nodes.length} nodes</span>
+              <span>
+                {Object.values(adjacencyList).reduce(
+                  (sum, edges) => sum + edges.length,
+                  0,
+                ) / 2}{" "}
+                edges
+              </span>
             </div>
           </div>
-        )}
-
-        {/* Stats footer */}
-        <div className="p-4 border-t bg-gray-50 text-xs text-gray-500">
-          <div className="flex justify-between">
-            <span>{nodes.length} nodes</span>
-            <span>
-              {Object.values(adjacencyList).reduce(
-                (sum, edges) => sum + edges.length,
-                0,
-              ) / 2}{" "}
-              edges
-            </span>
-          </div>
         </div>
-      </div>
+      )}
+
+      {/* Floating "Open Properties" Button - shown when sidebar is closed */}
+      {!isSidebarOpen && (
+        <button
+          onClick={() => setIsSidebarOpen(true)}
+          className="fixed top-20 right-4 z-40 p-3 bg-blue-600 hover:bg-blue-700 text-white rounded-lg shadow-lg transition-all hover:scale-105 flex items-center gap-2"
+          title="Open Properties Panel"
+        >
+          <ChevronRight className="w-5 h-5" />
+          <span className="text-sm font-medium">Properties</span>
+        </button>
+      )}
 
       {/* QR Code Modal */}
       {showQRModal && selectedNode && (
@@ -1430,6 +1424,15 @@ export default function MapEditor({ mapData, onMapUpdate }: MapEditorProps) {
           </div>
         </div>
       )}
+
+      {/* PIN Verification Modal */}
+      <PinVerificationModal
+        isOpen={showPinModal}
+        onClose={() => setShowPinModal(false)}
+        onVerify={handleSaveWithPin}
+        title="Save Map"
+        message="Enter 4-digit PIN to save changes to the map"
+      />
     </div>
   );
 }

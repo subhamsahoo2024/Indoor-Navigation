@@ -1,116 +1,337 @@
-# **NavX: Intelligent Indoor Navigation with Gemini 3**
+# NavX - Indoor Navigation System
 
-## **🚀 Overview**
+A comprehensive indoor navigation system for college campuses featuring multi-map navigation, AI-powered chatbot assistance, and QR code integration for seamless wayfinding.
 
-NavX is a next-generation indoor navigation platform that transforms static building layouts into interactive, intelligent maps. By combining the precision of **Dijkstra’s Pathfinding Algorithm** with the multimodal reasoning of **Gemini 3**, NavX automates map digitization and provides human-centric, voice-guided instructions across multi-floor environments.
+## 🚀 Tech Stack
 
-## **✨ Key Features**
+- **Framework**: Next.js 16+ with App Router
+- **Language**: TypeScript 5+ (Strict mode)
+- **Styling**: Tailwind CSS 4
+- **UI Components**: Lucide React for icons
+- **Animations**: Framer Motion 12+
+- **State Management**: Zustand 5+
+- **Database**: MongoDB with Mongoose 9+
+- **Authentication**: NextAuth.js 4+
+- **Graphics**: HTML5 Canvas for map rendering
+- **NLP**: Node-NLP for natural language processing
+- **QR Codes**: QRCode.react for QR generation
+- **Image Processing**: Browser Image Compression
 
-- **AI-Automated Map Digitization:** Leverages **Gemini 3 Vision** to detect room labels and infrastructure on architectural floor plans, automatically generating node coordinates with 1000x1000 pixel precision.
-- **Dynamic Shortest-Path Navigation:** Implements Dijkstra’s algorithm to calculate the most efficient route between any two points in a complex graph.
-- **Contextual AI Summaries:** Gemini 3 analyzes the calculated path to generate natural language instructions (e.g., _"Pass the library on your left and continue toward the main hall"_).
-- **Multi-Floor Awareness:** Seamlessly handles transitions between maps with AI-driven prompts to guide users across elevators and stairwells.
-- **Voice-Guided Assistance:** Integrated **Text-to-Speech (TTS)** with optimized pacing (0.8x rate) for clear, eyes-free navigation in busy hallways.
-- **Responsive SVG Overlay:** A high-performance, non-scaling SVG layer that renders sharp navigation paths regardless of device resolution.
+## ✨ Latest Features (v0.1.0)
 
----
+- 🔐 **Authentication System** - Secure admin authentication with NextAuth.js
+- 🖼️ **Advanced Image Processing** - Optimized map image handling with browser compression
+- 🎨 **Modern UI Components** - Beautiful icons with Lucide React
+- ⚡ **Performance Optimized** - Latest Next.js 16+ with improved App Router
+- 📱 **Enhanced Mobile Experience** - Responsive design with Tailwind CSS 4
+- 🔄 **Real-time State Management** - Efficient state updates with Zustand 5+
 
-## **🧠 Gemini 3 Integration**
+## Key Features
 
-NavX is built specifically to showcase the **multimodal** and **reasoning** strengths of the Gemini 3 model family:
+### Navigation
 
-1. **Spatial Reasoning (Gemini 3 Vision):** Instead of manual data entry, the Admin Dashboard uses Gemini 3 to "see" and "map" floor plans. It uses a normalized 1000-point grid to output structured JSON data for room locations.
-2. **Instruction Synthesis (Gemini 3 Reasoning):** The "Walking Guide" isn't a pre-written script. Gemini 3 takes raw path coordinates, identifies nearby landmarks, and synthesizes a unique narrative for every route.
-3. **Cross-Map Context Management:** Gemini 3 manages the logic of multi-map journeys, recognizing when a path hits a "gateway" and prompting the user to transition floors with specific verbal cues.
+- 🗺️ **Multi-Map Navigation** - Navigate across Campus, Building, and Floor levels
+- 🚪 **Gateway Nodes** - Seamless transitions between different map levels
+- 🎯 **Pathfinding** - Advanced graph-based algorithms (Dijkstra) with cross-map routing
+- 📍 **QR Code Integration** - Scan QR codes to instantly set your starting location
+- 🔍 **Smart Search** - Global search across all locations without needing to select buildings first
 
----
+### AI Chatbot
 
-## **🛠️ Tech Stack**
+- 🤖 **Natural Language Understanding** - Ask in plain language like "Where is the canteen?" or "Take me to library"
+- 🧠 **Intent Recognition** - Understands 30+ location categories and destinations using Node-NLP
+- 📍 **Location-Aware** - Finds nearest destination based on your current location
+- 💬 **Conversational Interface** - Friendly, animated chat experience with Framer Motion
 
-- **Frontend:** Next.js 14+ (App Router), Tailwind CSS, Framer Motion.
-- **AI Engine:** Google Gemini 3 (Pro & Flash) via Google GenAI SDK.
-- **Database:** Firebase.
-- **Algorithm:** Custom Dijkstra’s Algorithm implementation.
-- **Utilities:** Web Speech API (TTS), SWR (API Caching), Lucide React (Icons).
+### Admin Dashboard
 
----
+- 🔐 **Secure Authentication** - Protected admin access with NextAuth.js
+- 🔒 **PIN Verification** - 4-digit PIN security for critical operations (save/delete maps)
+- 🎨 **Visual Map Editor** - Upload and edit maps with an intuitive canvas interface
+- ➕ **Node Management** - Add, edit, and delete nodes with drag-and-drop
+- 🔗 **Edge Creation** - Connect nodes with weighted edges for pathfinding
+- 🏷️ **Category Tagging** - Tag locations for chatbot recognition (canteen, library, etc.)
+- 📤 **Map Upload** - Support for PNG/JPG map images with compression
 
-## **🏗️ Architecture & Flow**
+### User Experience
 
-1. **Digitization:** Image Upload → Gemini 3 (OCR/Spatial) → JSON Nodes → Firebase.
-2. **Pathfinding:** User Selects Start/End → Dijkstra (Shortest Path) → SVG Path Array.
-3. **Assistant:** Path Array → Gemini 3 (Summarization) → TTS Voice Playback.
+- 📱 **Mobile Responsive** - Fully optimized for mobile devices
+- ✨ **Smooth Animations** - Polished UI with Framer Motion
+- 🎯 **Real-time Routing** - Dynamic path visualization on canvas
+- 🔄 **Path Highlighting** - Clear visual guidance with animated paths
 
----
+## Getting Started
 
-## **⚙️ Installation & Setup**
+### Prerequisites
 
-### **Prerequisites**
+- Node.js 18.17 or later
+- MongoDB (local or MongoDB Atlas)
+- npm or yarn
 
-- Node.js 18.x or higher
-- Firebase account
-- Google AI Studio API Key (Gemini 3 access)
+### Installation
 
-### **Setup**
-
-1. **Clone the Repo:**
+1. Clone the repository:
 
 ```bash
-git clone https://github.com/yourusername/navx-navigation.git
-cd navx-navigation
-
+git clone https://navx-indoor-navigation.vercel.app/
 ```
 
-2. **Install Dependencies:**
+2. Install dependencies:
 
 ```bash
 npm install
-
 ```
 
-3. **Environment Variables:**
-   Create a `.env.local` file:
+3. Set up environment variables:
+
+Edit `.env`:
 
 ```env
-# Firebase Client SDK (Browser-side) - Public variables
-FIREBASE_API_KEY=your_firebase_api_key
-FIREBASE_AUTH_DOMAIN=your-project.firebaseapp.com
-FIREBASE_DATABASE_URL=https://your-project.firebasedatabase.app
-FIREBASE_STORAGE_BUCKET=your-project.firebasestorage.app
-FIREBASE_MESSAGING_SENDER_ID=your_sender_id
-FIREBASE_APP_ID=your_app_id
+# Database Configuration
+MONGODB_URI=mongodb://localhost:27017/navx-indoor-navigation
+# or for MongoDB Atlas:
+MONGODB_URI=mongodb+srv://username:password@cluster.mongodb.net/navx-indoor-navigation
 
-# Firebase Admin SDK (Server-side)
-FIREBASE_PROJECT_ID=your-project-id
-FIREBASE_CLIENT_EMAIL=your-service-account@your-project.iam.gserviceaccount.com
-FIREBASE_PRIVATE_KEY="-----BEGIN PRIVATE KEY-----\nYour-Private-Key\n-----END PRIVATE KEY-----\n"
+# NextAuth Configuration
+NEXTAUTH_URL=app url or http://localhost:3000
+NEXTAUTH_SECRET=your-secret-key-here
 
-# OR use service account file (recommended)
-FIREBASE_SERVICE_ACCOUNT="content of service-account.json"
-
-# Google Gemini AI
-GEMINI_API_KEY=your_gemini_api_key
-
-# App Settings
+# Enable database mode (set to "true" to use MongoDB, "false" for mock data)
 NEXT_PUBLIC_USE_DATABASE=true
 
-# Gemini Model
-GEMINI_MODEL= gemini-3-flash-preview
+# Admin Credentials
+
+# Admin 1 Credentials
+ADMIN1_USER=admin1
+ADMIN1_PASS=password1
+
+# Admin 2 Credentials
+ADMIN2_USER=admin2
+ADMIN2_PASS=password2
+
+#pin for map update
+MAP_UPDATE_PIN=pin
 ```
 
-4. **Run Development Server:**
+4. Seed the database (optional):
+
+```bash
+# Access http://localhost:3000/api/seed after starting dev server
+```
+
+### Development
 
 ```bash
 npm run dev
-
 ```
 
----
+Open [http://localhost:3000](http://localhost:3000) in your browser.
 
-## **🌍 Potential Impact**
+### Build
 
-- **Social Good:** Enhances accessibility by providing "stairs-free" routes for users with mobility impairments.
-- **Productivity:** Drastically reduces the time required for facility managers to digitize and maintain building maps.
-- **Wayfinding Anxiety:** Reduces stress for new students, visitors, and patients in large, high-pressure environments like hospitals and universities.
+```bash
+npm run build
+```
 
----
+### Production
+
+```bash
+npm start
+```
+
+## 📁 Repository Structure
+
+```
+NavX-indoor-nav/
+├── public/
+│   └── maps/                 # Map image assets
+├── src/
+│   ├── app/
+│   │   ├── page.tsx          # Landing page
+│   │   ├── navigate/         # User navigation interface
+│   │   ├── login/            # Authentication pages
+│   │   ├── admin/            # Admin dashboard
+│   │   │   └── map/[id]/     # Map editor
+│   │   └── api/
+│   │       ├── auth/         # NextAuth.js configuration
+│   │       ├── chat/         # NLP chatbot API
+│   │       ├── maps/         # Map CRUD operations
+│   │       ├── seed/         # Database seeding
+│   │       └── upload/       # Image upload handling
+│   ├── components/
+│   │   ├── IndoorNavigation.tsx   # Main navigation canvas
+│   │   ├── LocationSelector.tsx   # Location search & selection
+│   │   ├── AIChatbot.tsx          # AI chat interface
+│   │   ├── PinVerificationModal.tsx # Location verification
+│   │   ├── SessionProvider.tsx    # Auth session provider
+│   │   └── admin/
+│   │       └── MapEditor.tsx      # Visual map editor
+│   ├── hooks/
+│   │   ├── useImageDimensions.ts  # Image dimension utilities
+│   │   └── useMapDimensions.ts    # Map dimension calculations
+│   ├── lib/
+│   │   ├── auth.ts              # NextAuth configuration
+│   │   ├── db.ts                # MongoDB connection
+│   │   ├── imageUtils.ts        # Image processing utilities
+│   │   ├── mapService.ts        # Map data services
+│   │   └── pathfinder.ts        # Pathfinding algorithms
+│   ├── models/
+│   │   └── Map.ts               # MongoDB schema
+│   ├── types/
+│   │   ├── navigation.ts        # Navigation type definitions
+│   │   └── next-auth.d.ts       # NextAuth type extensions
+│   └── data/
+│       └── mockGraph.ts         # Sample data structure
+├── eslint.config.mjs            # ESLint configuration
+├── next.config.ts               # Next.js configuration
+├── postcss.config.mjs           # PostCSS configuration
+├── tailwind.config.ts           # Tailwind CSS configuration
+└── tsconfig.json                # TypeScript configuration
+```
+
+## Architecture
+
+### Multi-Map Navigation
+
+The system uses a hierarchical map structure with three levels:
+
+1. **Campus Map** - Overview of the entire campus with buildings
+2. **Building Maps** - Individual building layouts with floors
+3. **Floor Maps** - Detailed floor plans with rooms and corridors
+
+### Gateway Nodes
+
+Gateway Nodes are special connection points that:
+
+- Link different map levels together
+- Enable cross-map pathfinding
+- Represent entrances, staircases, elevators, and building connections
+- Allow seamless navigation from campus level to specific rooms
+
+Example: Campus Gate → Building A Entrance → Floor 2 Staircase → Room 201
+
+### Pathfinding Algorithm
+
+- Uses **Dijkstra's algorithm** for optimal path calculation
+- Supports **cross-map routing** through gateway nodes
+- Handles **weighted edges** for distance calculation
+- Provides **step-by-step directions** with map transitions
+
+### AI Chatbot System
+
+The chatbot uses a trained neural network (Node-NLP) to:
+
+1. Process user input in natural language
+2. Recognize intent from 30+ categories (canteen, library, restrooms, offices, etc.)
+3. Find the nearest matching location based on current position
+4. Provide conversational navigation guidance with smooth animations
+
+Supported categories include:
+
+- Facilities: Canteen, Library, Medical Room, Auditorium, Gym
+- Restrooms: General, Men's, Women's
+- Offices: Principal, Chairman, HOD (various departments)
+- Utilities: Drinking Water, Parking
+- Academic: Computer Labs, Classrooms
+
+## API Routes
+
+### Maps
+
+- `GET /api/maps` - List all maps
+- `GET /api/maps/[id]` - Get specific map details
+- `POST /api/maps` - Create new map
+- `PUT /api/maps/[id]` - Update map
+- `DELETE /api/maps/[id]` - Delete map
+
+### Chat
+
+- `POST /api/chat` - Process natural language query
+
+### Upload
+
+- `POST /api/upload` - Upload map image
+
+### Seed
+
+- `GET /api/seed` - Initialize database with sample data
+
+## Usage Guide
+
+### For Users
+
+1. **Start Navigation**:
+   - Visit `/navigate`
+   - Scan a QR code OR manually select your starting location
+   - Search for your destination
+   - Click "Start Navigation"
+
+2. **Use AI Chatbot**:
+   - Click the chat button
+   - Select your starting location from the dropdown
+   - Type your destination (e.g., "canteen", "library")
+   - Follow the generated route
+
+### For Admins
+
+1. **Access Admin Dashboard**:
+   - Go to `/login` for authentication (if NextAuth is configured)
+   - Navigate to `/admin` to access the dashboard
+   - All admin operations require proper authentication
+
+2. **Create a Map**:
+   - Click "Add New Map" in the admin dashboard
+   - Upload a map image (PNG/JPG supported with compression)
+   - Enter map details (name, type, parent)
+   - Save the map
+
+3. **Edit Maps with PIN Security**:
+   - Click on any existing map to open the editor
+   - Add/edit nodes by clicking on the map canvas
+   - Connect nodes by dragging between them
+   - Set node properties (name, type, category for chatbot)
+   - Assign edge weights for accurate pathfinding
+   - **Save changes**: Requires 4-digit PIN
+   - **Delete map**: Also requires PIN verification for security
+
+4. **Configure Categories for Chatbot**:
+   - Select a node in the map editor
+   - Choose appropriate category (canteen, library, restroom, etc.)
+   - Save to make locations discoverable via AI chatbot
+
+## Database Schema
+
+### Map Collection
+
+```typescript
+{
+  id: string;              // Unique identifier
+  name: string;            // Map name
+  type: 'CAMPUS' | 'BUILDING' | 'FLOOR';
+  parentId?: string;       // Parent map reference
+  imageUrl: string;        // Path to map image
+  width: number;           // Canvas width
+  height: number;          // Canvas height
+  nodes: Node[];           // Navigation points
+  edges: Edge[];           // Connections between nodes
+}
+```
+
+### Node Structure
+
+```typescript
+{
+  id: string;
+  x: number;               // Canvas position
+  y: number;
+  name: string;
+  type: 'GATEWAY' | 'ROOM' | 'POINT';
+  category?: string;       // For chatbot recognition
+  connectedMapId?: string; // For gateway nodes
+  connectedNodeId?: string;
+}
+```
+
+## 🤝 Contributing
+
+We welcome contributions to NavX!

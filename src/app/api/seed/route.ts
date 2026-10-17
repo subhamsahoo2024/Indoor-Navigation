@@ -1,5 +1,6 @@
 import { NextResponse } from "next/server";
-import { db } from "@/lib/firebase";
+import dbConnect from "@/lib/db";
+import MapModel, { toMongooseAdjacencyList } from "@/models/Map";
 import { campusMainMap, blockALobbyMap, floor1Map } from "@/data/mockGraph";
 
 /**
@@ -9,55 +10,38 @@ import { campusMainMap, blockALobbyMap, floor1Map } from "@/data/mockGraph";
  */
 export async function GET() {
   try {
-    const mapsCollection = db.collection("maps");
+    await dbConnect();
 
     // Clear existing data
-    const existingDocs = await mapsCollection.get();
-    const batch = db.batch();
-    existingDocs.docs.forEach((doc) => {
-      batch.delete(doc.ref);
-    });
-    await batch.commit();
+    await MapModel.deleteMany({});
 
     // Prepare maps for insertion
-    const mapsToInsert = [campusMainMap, blockALobbyMap, floor1Map];
-
-    // Insert all maps using batch write
-    const insertBatch = db.batch();
-    const timestamp = new Date();
-
-    mapsToInsert.forEach((map) => {
-      const docRef = mapsCollection.doc(map.id);
-      insertBatch.set(docRef, {
+    const mapsToInsert = [campusMainMap, blockALobbyMap, floor1Map].map(
+      (map) => ({
         id: map.id,
         name: map.name,
         imageUrl: map.imageUrl,
         nodes: map.nodes,
-        adjacencyList: map.adjacencyList,
-        createdAt: timestamp,
-        updatedAt: timestamp,
-      });
-    });
+        adjacencyList: toMongooseAdjacencyList(map.adjacencyList),
+      })
+    );
 
-    await insertBatch.commit();
+    // Insert all maps
+    await MapModel.insertMany(mapsToInsert);
 
     // Fetch inserted maps to return
-    const insertedSnapshot = await mapsCollection.get();
-    const insertedMaps = insertedSnapshot.docs.map((doc) => {
-      const data = doc.data();
-      return {
-        id: doc.id,
-        name: data.name,
-        nodeCount: data.nodes?.length || 0,
-      };
-    });
+    const insertedMaps = await MapModel.find({});
 
     return NextResponse.json({
       success: true,
       message: "Database seeded successfully",
       data: {
         mapsInserted: insertedMaps.length,
-        maps: insertedMaps,
+        maps: insertedMaps.map((m) => ({
+          id: m.id,
+          name: m.name,
+          nodeCount: m.nodes.length,
+        })),
       },
     });
   } catch (error) {
@@ -76,10 +60,12 @@ export async function GET() {
 /**
  * POST /api/seed
  * Alternative endpoint that accepts custom seed data
- * Input: { maps: MapData[], clearExisting?: boolean }
+ * Input: { maps: MapData[] }
  */
 export async function POST(request: Request) {
   try {
+    await dbConnect();
+
     const body = await request.json();
     const { maps, clearExisting = false } = body;
 
@@ -93,23 +79,13 @@ export async function POST(request: Request) {
       );
     }
 
-    const mapsCollection = db.collection("maps");
-
     // Optionally clear existing data
     if (clearExisting) {
-      const existingDocs = await mapsCollection.get();
-      const deleteBatch = db.batch();
-      existingDocs.docs.forEach((doc) => {
-        deleteBatch.delete(doc.ref);
-      });
-      await deleteBatch.commit();
+      await MapModel.deleteMany({});
     }
 
-    // Insert maps using batch write
-    const insertBatch = db.batch();
-    const timestamp = new Date();
-
-    maps.forEach(
+    // Prepare and insert maps
+    const mapsToInsert = maps.map(
       (map: {
         id: string;
         name: string;
@@ -130,27 +106,24 @@ export async function POST(request: Request) {
           string,
           Array<{ targetNodeId: string; weight: number }>
         >;
-      }) => {
-        const docRef = mapsCollection.doc(map.id);
-        insertBatch.set(docRef, {
-          id: map.id,
-          name: map.name,
-          imageUrl: map.imageUrl,
-          nodes: map.nodes,
-          adjacencyList: map.adjacencyList,
-          createdAt: timestamp,
-          updatedAt: timestamp,
-        });
-      }
+      }) => ({
+        id: map.id,
+        name: map.name,
+        imageUrl: map.imageUrl,
+        nodes: map.nodes,
+        adjacencyList: toMongooseAdjacencyList(map.adjacencyList),
+      })
     );
 
-    await insertBatch.commit();
+    const result = await MapModel.insertMany(mapsToInsert, {
+      ordered: false, // Continue on error
+    });
 
     return NextResponse.json({
       success: true,
       message: "Custom seed completed",
       data: {
-        mapsInserted: maps.length,
+        mapsInserted: result.length,
       },
     });
   } catch (error) {

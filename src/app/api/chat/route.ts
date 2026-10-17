@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
-import { GoogleGenerativeAI } from "@google/generative-ai";
+// eslint-disable-next-line @typescript-eslint/no-var-requires
+const { NlpManager } = require("node-nlp");
 
 interface ChatRequest {
   text: string;
@@ -10,133 +11,684 @@ interface ChatResponse {
   score?: number;
 }
 
-const DEFAULT_MODEL = "gemini-3-flash-preview";
-const getModelName = () =>
-  process.env.GEMINI_CHAT_MODEL || process.env.GEMINI_MODEL || DEFAULT_MODEL;
-
 export async function POST(
-  request: NextRequest,
+  request: NextRequest
 ): Promise<NextResponse<ChatResponse>> {
   try {
-    if (!process.env.GEMINI_API_KEY) {
-      return NextResponse.json(
-        { intent: "unknown", score: 0 },
-        { status: 500 },
-      );
-    }
-
-    const genAI = new GoogleGenerativeAI(process.env.GEMINI_API_KEY);
     const body: ChatRequest = await request.json();
     const { text } = body;
 
     if (!text || typeof text !== "string" || text.trim() === "") {
       return NextResponse.json(
-        { intent: "unknown", score: 0 },
-        { status: 400 },
+        { intent: "unknown no string" },
+        { status: 400 }
       );
     }
 
-    // Valid categories for intent classification
-    const validCategories = {
-      canteen: "Food, cafeteria, eating, snacks, meals, hungry",
-      restroom_men:
-        "Men's toilet, boys washroom, gents restroom, male bathroom, urinals",
-      restroom_women:
-        "Women's toilet, ladies washroom, girls restroom, female bathroom, powder room",
-      restroom_general:
-        "General restroom, toilet, washroom, bathroom, WC, lavatory",
-      library:
-        "Books, study, reading, quiet place, library resources, borrowing books",
-      medical:
-        "Doctor, clinic, sick, injury, first aid, health center, pharmacy, medical help",
-      office_principal: "Principal office, dean, director, head of college",
-      office_chairman: "Chairman office, chairperson, founder, trustee",
-      office_hod: "Head of department, HOD office, department head",
-      staff_room: "Teacher, faculty, professor, staff meeting, instructors",
-      office: "Administration, registrar, admission office, general office",
-      accounts:
-        "Fees, payment, finance, billing, accounts department, fee payment",
-      ground:
-        "Sports, playground, cricket, football, outdoor games, sports field",
-      gym: "Gymnasium, exercise, workout, fitness center, weight training",
-      auditorium: "Event hall, function, gathering, auditorium",
-      auditorium_kaveri: "Kaveri auditorium, Kaveri hall",
-      auditorium_parthasarathy: "Parthasarathy auditorium, Parthasarathy hall",
-      drinking_water:
-        "Water, drinking water, thirsty, water cooler, water dispenser",
-      parking: "Parking area, vehicle parking, car/bike parking, parking lot",
-      office_hod_cse: "Computer Science HOD, CSE department head",
-      office_hod_ece: "Electronics HOD, ECE department head",
-      office_hod_mech: "Mechanical HOD, Mechanical department head",
-      office_hod_civil: "Civil Engineering HOD, Civil department head",
-      office_hod_it: "Information Technology HOD, IT department head",
-      office_hod_aiml:
-        "AI/ML HOD, Artificial Intelligence Machine Learning department head",
-      office_hod_aids:
-        "AI/DS HOD, Artificial Intelligence Data Science department head",
-      computer_lab: "Computer laboratory, computer room, lab",
-      gate: "Main gate, entrance, exit, college gate, main door",
+    // Initialize and train the NLP manager with useNoneFeature disabled
+    const manager = new NlpManager({
+      languages: ["en"],
+      nlu: { useNoneFeature: true },
+    });
+
+    // Training data for different intents (expanded with gender-specific restrooms)
+    const trainingData = {
+      canteen: [
+        "hungry",
+        "eat",
+        "lunch",
+        "food",
+        "cafeteria",
+        "snack",
+        "drink",
+        "coffee",
+        "starving",
+        "famished",
+        "grab a bite",
+        "something to eat",
+        "tummy",
+        "stomach",
+        "rice",
+        "chicken",
+        "juice",
+        "noodles",
+        "puffs",
+        "breakfast",
+        "dinner",
+        "meal",
+        "canteen food",
+        "fast food",
+        "healthy food",
+        "junk food",
+        "tea",
+        "milk",
+        "water",
+        "soft drink",
+        "sandwich",
+        "burger",
+        "pizza",
+        "fried rice",
+        "biryani",
+        "veg food",
+        "non veg",
+        "sweets",
+        "biscuits",
+        "chips",
+        "cake",
+        "ice cream",
+        "snacks counter",
+        "food court",
+        "canteen menu",
+        "order food",
+        "buy food",
+        "get food",
+      ],
+
+      restroom_men: [
+        "boys",
+        "gents",
+        "men",
+        "male",
+        "he",
+        "boys toilet",
+        "gents washroom",
+        "men's room",
+        "mens toilet",
+        "boys bathroom",
+        "gents restroom",
+        "urinal",
+        "male restroom",
+        "men restroom",
+        "men washroom",
+        "boys washroom",
+        "male toilet",
+        "gents toilet",
+        "men bathroom",
+        "boys restroom",
+        "where is men's toilet",
+        "where is gents washroom",
+        "need men's restroom",
+        "find men's toilet",
+        "nearest men's washroom",
+        "nearest gents toilet",
+        "washroom for men",
+        "toilet for men",
+        "bathroom for men",
+        "restroom for men",
+        "male washroom",
+        "male bathroom",
+        "men toilet nearby",
+        "gents restroom nearby",
+        "men washroom nearby",
+        "boys toilet nearby",
+        "urinals",
+        "mens washroom",
+        "mens bathroom",
+        "mens restroom",
+        "gents bathroom",
+        "boys urinal",
+        "standing toilet",
+        "men loo",
+        "gents loo",
+        "male loo",
+        "public men's toilet",
+        "men WC",
+      ],
+
+      restroom_women: [
+        "girls",
+        "ladies",
+        "women",
+        "female",
+        "she",
+        "girls toilet",
+        "ladies washroom",
+        "women's room",
+        "womens toilet",
+        "girls bathroom",
+        "ladies restroom",
+        "powder room",
+        "female restroom",
+        "women restroom",
+        "women washroom",
+        "girls washroom",
+        "female toilet",
+        "ladies toilet",
+        "women bathroom",
+        "girls restroom",
+        "where is women's toilet",
+        "where is ladies washroom",
+        "need women's restroom",
+        "find ladies toilet",
+        "nearest women's washroom",
+        "nearest ladies toilet",
+        "washroom for women",
+        "toilet for women",
+        "bathroom for women",
+        "restroom for women",
+        "female washroom",
+        "female bathroom",
+        "women toilet nearby",
+        "ladies restroom nearby",
+        "women washroom nearby",
+        "girls toilet nearby",
+        "womens washroom",
+        "womens bathroom",
+        "womens restroom",
+        "ladies bathroom",
+        "girls WC",
+        "women WC",
+        "ladies WC",
+        "female WC",
+        "women loo",
+        "ladies loo",
+        "female loo",
+        "public women's toilet",
+        "women restroom near me",
+      ],
+
+      restroom_general: [
+        "toilet",
+        "washroom",
+        "bathroom",
+        "loo",
+        "restroom",
+        "nature calls",
+        "pee",
+        "need toilet",
+        "where is toilet",
+        "find toilet",
+        "nearest toilet",
+        "public toilet",
+        "washroom nearby",
+        "bathroom nearby",
+        "restroom nearby",
+        "toilet nearby",
+        "need washroom",
+        "need bathroom",
+        "need restroom",
+        "go to toilet",
+        "use washroom",
+        "use bathroom",
+        "use restroom",
+        "urinate",
+        "urination",
+        "take a leak",
+        "potty",
+        "wc",
+        "water closet",
+        "relieve myself",
+        "relief room",
+        "lavatory",
+        "comfort room",
+        "sanitary room",
+        "sanitation",
+        "sanitary toilet",
+        "flush",
+        "hand wash",
+        "wash basin",
+        "sink",
+        "toilet room",
+        "rest room",
+        "bath room",
+        "wash room",
+        "need to pee",
+        "need to go",
+        "toilet area",
+        "restroom area",
+        "nearest washroom",
+        "nearest bathroom",
+      ],
+
+      library: [
+        "book",
+        "study",
+        "quiet",
+        "library",
+        "read",
+        "notes",
+        "reference",
+        "borrow book",
+        "silence",
+        "exam",
+      ],
+
+      medical: [
+        "sick",
+        "doctor",
+        "hurt",
+        "medical",
+        "pharmacy",
+        "first aid",
+        "hospital",
+        "clinic",
+        "medical room",
+        "health center",
+        "infirmary",
+        "nurse",
+        "doctor room",
+        "medical help",
+        "health care",
+        "healthcare",
+        "medicine",
+        "medicines",
+        "medical store",
+        "pharmacist",
+        "emergency",
+        "medical emergency",
+        "need doctor",
+        "call doctor",
+        "see a doctor",
+        "injured",
+        "injury",
+        "pain",
+        "bleeding",
+        "wound",
+        "accident",
+        "not feeling well",
+        "feeling ill",
+        "fever",
+        "cold",
+        "headache",
+        "stomach pain",
+        "body pain",
+        "sprain",
+        "fracture",
+        "burn",
+        "cut",
+        "first aid kit",
+        "bandage",
+        "tablet",
+        "pill",
+        "medical assistance",
+        "health issue",
+        "treatment",
+      ],
+
+      office_principal: [
+        "principal",
+        "dean",
+        "director",
+        "head of college",
+        "chief",
+        "college head",
+        "principal office",
+        "meet principal",
+      ],
+
+      office_chairman: [
+        "chairman",
+        "chair person",
+        "founder",
+        "trustee",
+        "owner",
+        "chairperson",
+        "chairman office",
+        "meet chairman",
+      ],
+
+      office_hod: [
+        "hod",
+        "head of department",
+        "department head",
+        "hod office",
+        "meet hod",
+        "department chief",
+      ],
+
+      staff_room: [
+        "teacher",
+        "faculty",
+        "professor",
+        "staff",
+        "meet sir",
+        "meet madam",
+        "instructors",
+        "staff room",
+        "faculty room",
+        "teachers room",
+      ],
+
+      office: ["admin", "registrar", "office", "admission"],
+
+      accounts: [
+        "fee",
+        "fees",
+        "payment",
+        "pay fees",
+        "accounts",
+        "finance",
+        "tuition",
+        "tuition fee",
+        "college fee",
+        "school fee",
+        "semester fee",
+        "exam fee",
+        "hostel fee",
+        "library fee",
+        "bus fee",
+        "fine",
+        "late fee",
+        "due fee",
+        "fee payment",
+        "fee receipt",
+        "payment receipt",
+        "bill",
+        "billing",
+        "invoice",
+        "finance office",
+        "accounts office",
+        "accounts department",
+        "finance department",
+        "cash counter",
+        "fee counter",
+        "payment counter",
+        "pay money",
+        "pay amount",
+        "online payment",
+        "offline payment",
+        "bank",
+        "cheque",
+        "cash",
+        "card payment",
+        "upi",
+        "transaction",
+        "refund",
+        "refund status",
+        "fee refund",
+        "balance",
+        "outstanding amount",
+        "accounts section",
+        "finance section",
+      ],
+
+      ground: [
+        "play",
+        "playing",
+        "cricket",
+        "football",
+        "sports",
+        "game",
+        "sports ground",
+        "playground",
+        "open ground",
+        "college ground",
+        "school ground",
+        "cricket ground",
+        "football ground",
+        "sports field",
+        "field",
+        "stadium",
+        "sports area",
+        "outdoor sports",
+        "athletics",
+        "track",
+        "running track",
+        "practice ground",
+        "training ground",
+        "sports practice",
+        "team practice",
+        "match",
+        "tournament",
+        "sports event",
+        "warm up",
+        "exercise outside",
+        "running",
+        "jogging",
+        "walk",
+        "morning walk",
+        "evening walk",
+        "play outside",
+        "kick football",
+        "batting",
+        "bowling",
+        "nets",
+        "sports club",
+        "physical training",
+        "pt ground",
+        "sports session",
+        "play match",
+        "ground nearby",
+        "sports ground nearby",
+        "where is ground",
+        "go to ground",
+      ],
+
+      gym: [
+        "gym",
+        "exercise",
+        "workout",
+        "fitness",
+        "train",
+        "training",
+        "gymnasium",
+        "fitness center",
+        "workout room",
+        "exercise room",
+        "weight training",
+        "weights",
+        "lifting",
+        "weight lifting",
+        "cardio",
+        "treadmill",
+        "cycling",
+        "cross trainer",
+        "strength training",
+        "bodybuilding",
+        "muscle",
+        "muscle training",
+        "abs workout",
+        "chest workout",
+        "leg workout",
+        "arm workout",
+        "back workout",
+        "fitness training",
+        "personal training",
+        "trainer",
+        "gym trainer",
+        "warm up",
+        "stretching",
+        "cool down",
+        "fitness routine",
+        "gym session",
+        "go to gym",
+        "need gym",
+        "where is gym",
+        "gym nearby",
+        "fitness area",
+        "health club",
+        "indoor fitness",
+        "exercise equipment",
+        "dumbbells",
+        "barbell",
+        "bench press",
+        "pull ups",
+        "push ups",
+      ],
+
+      auditorium: ["event", "function", "gathering", "auditorium", "hall"],
+      auditorium_kaveri: ["kaveri auditorium", "kaveri hall"],
+      auditorium_parthasarathy: [
+        "parthasarathy auditorium",
+        "parthasarathy hall",
+      ],
+      drinking_water: [
+        "drinking water",
+        "water",
+        "water point",
+        "water facility",
+        "water supply",
+        "water place",
+        "water station",
+        "water cooler",
+        "water dispenser",
+        "filtered water",
+        "RO water",
+        "purified water",
+        "cold water",
+        "normal water",
+        "hot water",
+        "need water",
+        "thirsty",
+        "feeling thirsty",
+        "drink water",
+        "where is water",
+        "find water",
+        "nearest water",
+        "water nearby",
+        "drinking water nearby",
+        "water cooler nearby",
+        "refill bottle",
+        "bottle refill",
+        "fill bottle",
+        "refill water",
+        "water tap",
+        "tap water",
+        "water sink",
+        "water basin",
+        "water filter",
+        "water machine",
+        "water purifier",
+        "hydration",
+        "hydration station",
+        "water stand",
+        "public water",
+        "free water",
+        "water facility nearby",
+        "RO plant",
+        "aqua guard",
+        "bisleri",
+        "mineral water",
+        "safe water",
+        "clean water",
+      ],
+      parking: [
+        "parking",
+        "parking area",
+        "parking lot",
+        "parking place",
+        "vehicle parking",
+        "car parking",
+        "bike parking",
+        "two wheeler parking",
+        "four wheeler parking",
+        "visitor parking",
+        "staff parking",
+        "student parking",
+        "open parking",
+        "covered parking",
+        "basement parking",
+        "parking ground",
+        "parking zone",
+        "parking space",
+        "parking slot",
+        "parking stand",
+        "park vehicle",
+        "park my car",
+        "park my bike",
+        "where is parking",
+        "find parking",
+        "nearest parking",
+        "parking nearby",
+        "vehicle stand",
+        "bike stand",
+        "cycle stand",
+        "car stand",
+        "scooter parking",
+        "motorcycle parking",
+        "parking entry",
+        "parking exit",
+        "parking gate",
+        "parking block",
+        "parking building",
+        "garage",
+        "basement garage",
+        "underground parking",
+        "public parking",
+        "free parking",
+        "paid parking",
+        "parking for visitors",
+        "parking location",
+        "parking area nearby",
+      ],
+      office_hod_cse: [
+        "cse hod",
+        "computer science hod",
+        "head of computer department",
+        "meet cse sir",
+        "hod cse",
+      ],
+
+      office_hod_ece: [
+        "ece hod",
+        "electronics hod",
+        "head of electronics",
+        "meet ece hod",
+      ],
+
+      office_hod_mech: ["mechanical hod", "mech hod", "head of mechanical"],
+
+      office_hod_civil: ["civil hod", "civil engineering hod"],
+
+      office_hod_it: ["it hod", "information technology hod"],
+
+      office_hod_aiml: [
+        "aiml hod",
+        "artificial intelligence machine learning hod",
+        "artificial intelligence machine learning head of the department",
+      ],
+
+      office_hod_aids: [
+        "aids hod",
+        "artificial intelligence data science hod",
+        "artificial intelligence data science head of the department",
+      ],
+
+      computer_lab: [
+        "computer lab",
+        "computer laboratory",
+        "lab",
+        "computer room",
+      ],
+
+      gate: [
+        "main gate",
+        "enterance",
+        "exit",
+        "main door",
+        "college gate",
+        "watchman",
+      ],
     };
 
-    // Create prompt for Gemini
-    const categoryList = Object.keys(validCategories).join(", ");
-    const categoryDescriptions = Object.entries(validCategories)
-      .map(([key, desc]) => `- ${key}: ${desc}`)
-      .join("\n");
-
-    const prompt = `You are a Campus Navigation Intent Classifier for an indoor navigation system.
-
-Your task: Analyze the user's input and determine which campus location category they are looking for.
-
-Valid Categories and their meanings:
-${categoryDescriptions}
-
-User Input: "${text}"
-
-Instructions:
-1. Carefully analyze the user's intent
-2. Match it to the MOST RELEVANT category from the list above
-3. Return ONLY the category name (e.g., "canteen", "library", "restroom_men")
-4. If the intent is unclear or doesn't match any category, return "unknown"
-5. Do NOT include explanations, markdown, or any other text - ONLY the category name
-
-Response:`;
-
-    // Initialize Gemini model with system instruction
-    const model = genAI.getGenerativeModel({
-      model: getModelName(),
-      systemInstruction: `You are a precise intent classifier for a campus navigation system. 
-You must return ONLY one of these category names: ${categoryList}, or "unknown".
-Never include explanations, formatting, or additional text.
-Match user requests to the most appropriate category based on their intent.`,
+    // Add training documents for each intent
+    Object.entries(trainingData).forEach(([intent, phrases]) => {
+      phrases.forEach((phrase) => {
+        manager.addDocument("en", phrase, intent);
+      });
     });
 
-    // Generate response
-    const result = await model.generateContent(prompt);
-    const response = await result.response;
-    let intent = response.text().trim().toLowerCase();
-    if (!intent) {
-      return NextResponse.json(
-        { intent: "unknown", score: 0 },
-        { status: 502 },
-      );
+    // Train the model
+    await manager.train();
+
+    // Process user input
+    const result = await manager.process("en", text.trim());
+
+    // Debug logging - view raw classifications in terminal
+    // console.log("NLP Classifications:", result.classifications);
+    // console.log("Top Intent:", result.intent, "Score:", result.score);
+
+    // Return the best matching intent (no strict threshold)
+    if (result.intent === "None" || result.score < 0.7) {
+      return NextResponse.json({ intent: "unknown", score: 0 });
     }
 
-    // Clean up response - remove markdown backticks or quotes if present
-    intent = intent.replace(/```/g, "").replace(/['"]/g, "").trim();
-
-    // Validate that the intent is in our list of valid categories
-    if (!Object.keys(validCategories).includes(intent)) {
-      intent = "unknown";
-    }
-
-    // Return with confidence score of 1 (Gemini is confident in its classification)
     return NextResponse.json({
-      intent: intent,
-      score: intent === "unknown" ? 0 : 0.95,
+      intent: result.intent,
+      score: Number(result.score.toFixed(2)),
     });
   } catch (error) {
-    console.error("Gemini API error:", error);
-    return NextResponse.json({ intent: "unknown", score: 0 }, { status: 500 });
+    console.error("Chat API error:", error);
+    return NextResponse.json({ intent: "unknown 500" }, { status: 500 });
   }
 }

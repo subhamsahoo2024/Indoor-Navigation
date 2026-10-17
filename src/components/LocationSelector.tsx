@@ -346,11 +346,11 @@ export default function LocationSelector({
         opt.mapId === initialStartMapId && opt.nodeId === initialStartNodeId,
     );
 
-    if (matchingOption && !startLocation) {
+    if (matchingOption) {
       setStartLocation(matchingOption);
       setIsStartLockedByQR(true);
     }
-  }, [initialStartMapId, initialStartNodeId, allOptions, startLocation]);
+  }, [initialStartMapId, initialStartNodeId, allOptions]);
 
   // Auto-set end location from chatbot
   useEffect(() => {
@@ -658,13 +658,7 @@ export default function LocationSelector({
           </button>
         </div>
 
-        {/* Footer */}
-        <div className="bg-gray-50 px-4 sm:px-6 py-3 sm:py-4 border-t">
-          <p className="text-xs text-gray-500 text-center">
-            Tip: Just type a location name like &quot;Dean&apos;s Office&quot; -
-            no need to select a building first!
-          </p>
-        </div>
+        
       </div>
     </div>
   );

@@ -15,23 +15,26 @@ export default function LandingPage() {
       {/* Content */}
       <div className="relative z-10 text-center max-w-4xl mx-auto">
         {/* Logo */}
-        <div className="flex justify-center mb-8">
-          <div className="w-48 h-48">
+        <div className="flex justify-center my-4 animate-fadeInUp delay-100">
+          <div className="w-40 h-40 sm:w-48 sm:h-48">
             <img
-              src="/navigation-logo.png"
+              src="/home-logo.png"
               alt="Indoor Navigation Logo"
-              className="w-full h-full object-contain drop-shadow-lg hover:scale-105 transition-transform duration-300"
+              className="w-full h-full object-contain drop-shadow-lg hover:scale-110 transition-transform duration-500"
             />
           </div>
         </div>
 
         {/* Title */}
-        <h1 className="text-5xl md:text-6xl font-bold text-white mb-4 tracking-tight">
-          NavX
-          <span className="block bg-gradient-to-r from-blue-400 via-cyan-400 to-teal-400 bg-clip-text text-transparent">
-            Smart Navigation System
-          </span>
-        </h1>
+
+        <div className="mb-2">
+          <h1 className="font-(family-name:--font-russo-one) text-2xl md:text-4xl font-black text-white mb-1 tracking-wider uppercase leading-tight">
+            NavX Indoor
+            <span className="block bg-linear-to-r from-blue-400 via-cyan-400 to-teal-400 bg-clip-text text-transparent">
+              Navigation System
+            </span>
+          </h1>
+        </div>
 
         {/* Subtitle */}
         <p className="text-xl text-slate-400 mb-16 max-w-2xl mx-auto">
@@ -125,9 +128,14 @@ export default function LandingPage() {
         </div>
 
         {/* Footer */}
-        <div className="mt-16 text-slate-500 text-sm">
-          <p>Multi-Map Navigation with Gateway Nodes</p>
-          <p className="mt-1 text-slate-600">GPS-free indoor positioning</p>
+
+        <div className="mt-5 text-center relative z-10">
+          <p className="text-slate-500 text-[10px] sm:text-xs font-medium tracking-wide">
+            Developed by Subham Sahoo S.
+          </p>
+          <p className="text-slate-500 text-[10px] sm:text-xs font-medium tracking-wide">
+            &copy; All rights reserved.
+          </p>
         </div>
       </div>
     </main>

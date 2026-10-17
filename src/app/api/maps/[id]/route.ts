@@ -1,7 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
-import { db } from "@/lib/firebase";
+import dbConnect from "@/lib/db";
+import MapModel, { toMongooseAdjacencyList } from "@/models/Map";
 import type { MapData } from "@/types/navigation";
-import { isDatabaseImage, getImageIdFromUrl } from "@/lib/imageUtils";
 
 interface RouteParams {
   params: Promise<{ id: string }>;
@@ -13,32 +13,12 @@ interface RouteParams {
  */
 export async function GET(request: NextRequest, { params }: RouteParams) {
   try {
+    await dbConnect();
+
     const { id } = await params;
-    const mapsCollection = db.collection("maps");
+    const map = await MapModel.findOne({ id });
 
-    // First try to find by custom id field
-    const snapshot = await mapsCollection.where("id", "==", id).get();
-
-    if (!snapshot.empty) {
-      const doc = snapshot.docs[0];
-      const data = doc.data();
-      if (!data) {
-        return NextResponse.json(
-          { success: false, error: "Map data is missing" },
-          { status: 500 },
-        );
-      }
-      return NextResponse.json({
-        success: true,
-        data: { ...data, id: (data as Partial<MapData>).id || doc.id },
-      });
-    }
-
-    // Fallback: try to find by document ID
-    const docRef = mapsCollection.doc(id);
-    const doc = await docRef.get();
-
-    if (!doc.exists) {
+    if (!map) {
       return NextResponse.json(
         {
           success: false,
@@ -48,17 +28,9 @@ export async function GET(request: NextRequest, { params }: RouteParams) {
       );
     }
 
-    const data = doc.data();
-    if (!data) {
-      return NextResponse.json(
-        { success: false, error: "Map data is missing" },
-        { status: 500 },
-      );
-    }
-
     return NextResponse.json({
       success: true,
-      data: { ...data, id: (data as Partial<MapData>).id || doc.id },
+      data: map.toJSON(),
     });
   } catch (error) {
     console.error(`GET /api/maps/[id] error:`, error);
@@ -75,58 +47,54 @@ export async function GET(request: NextRequest, { params }: RouteParams) {
 /**
  * PUT /api/maps/[id]
  * Update a map (full replacement)
- * Input: Full MapData object
+ * Input: Full MapData object + pin for verification
  */
 export async function PUT(request: NextRequest, { params }: RouteParams) {
   try {
+    await dbConnect();
+
     const { id } = await params;
-    const body: Partial<MapData> = await request.json();
+    const body: Partial<MapData> & { pin?: string } = await request.json();
 
-    const mapsCollection = db.collection("maps");
-
-    // First try to find by custom id field
-    const snapshot = await mapsCollection.where("id", "==", id).get();
-    let docRef;
-
-    if (!snapshot.empty) {
-      docRef = snapshot.docs[0].ref;
-    } else {
-      // Fallback: try to find by document ID
-      docRef = mapsCollection.doc(id);
-      const doc = await docRef.get();
-
-      if (!doc.exists) {
-        return NextResponse.json(
-          {
-            success: false,
-            error: `Map '${id}' not found`,
-          },
-          { status: 404 },
-        );
-      }
+    // Verify PIN
+    const REQUIRED_PIN = process.env.MAP_UPDATE_PIN;
+    if (!body.pin || body.pin !== REQUIRED_PIN) {
+      return NextResponse.json(
+        {
+          success: false,
+          error: "Invalid or missing PIN",
+        },
+        { status: 403 },
+      );
     }
 
-    // Prepare update data
-    const updateData: any = {
-      updatedAt: new Date(),
-    };
+    // Find existing map
+    const existingMap = await MapModel.findOne({ id });
 
-    if (body.name !== undefined) updateData.name = body.name;
-    if (body.imageUrl !== undefined) updateData.imageUrl = body.imageUrl;
-    if (body.nodes !== undefined) updateData.nodes = body.nodes;
-    if (body.adjacencyList !== undefined)
-      updateData.adjacencyList = body.adjacencyList;
+    if (!existingMap) {
+      return NextResponse.json(
+        {
+          success: false,
+          error: `Map '${id}' not found`,
+        },
+        { status: 404 },
+      );
+    }
 
-    // Update the document
-    await docRef.update(updateData);
+    // Update fields
+    if (body.name !== undefined) existingMap.name = body.name;
+    if (body.imageUrl !== undefined) existingMap.imageUrl = body.imageUrl;
+    if (body.mapImage !== undefined) existingMap.mapImage = body.mapImage;
+    if (body.nodes !== undefined) existingMap.nodes = body.nodes;
+    if (body.adjacencyList !== undefined) {
+      existingMap.adjacencyList = toMongooseAdjacencyList(body.adjacencyList);
+    }
 
-    // Fetch and return updated document
-    const updatedDoc = await docRef.get();
-    const updatedData = updatedDoc.data();
+    await existingMap.save();
 
     return NextResponse.json({
       success: true,
-      data: { ...updatedData, id: updatedData?.id || updatedDoc.id },
+      data: existingMap.toJSON(),
     });
   } catch (error) {
     console.error(`PUT /api/maps/[id] error:`, error);
@@ -142,55 +110,39 @@ export async function PUT(request: NextRequest, { params }: RouteParams) {
 
 /**
  * DELETE /api/maps/[id]
- * Delete a map and its associated image (if stored in database)
+ * Delete a map
+ * Requires PIN for verification
  */
 export async function DELETE(request: NextRequest, { params }: RouteParams) {
   try {
+    await dbConnect();
+
     const { id } = await params;
-    const mapsCollection = db.collection("maps");
+    const body = await request.json();
 
-    // First try to find by custom id field
-    const snapshot = await mapsCollection.where("id", "==", id).get();
-    let docRef;
-    let mapData;
-
-    if (!snapshot.empty) {
-      docRef = snapshot.docs[0].ref;
-      mapData = snapshot.docs[0].data();
-    } else {
-      // Fallback: try to find by document ID
-      docRef = mapsCollection.doc(id);
-      const doc = await docRef.get();
-
-      if (!doc.exists) {
-        return NextResponse.json(
-          {
-            success: false,
-            error: `Map '${id}' not found`,
-          },
-          { status: 404 },
-        );
-      }
-      mapData = doc.data();
+    // Verify PIN
+    const REQUIRED_PIN = "2026";
+    if (!body.pin || body.pin !== REQUIRED_PIN) {
+      return NextResponse.json(
+        {
+          success: false,
+          error: "Invalid or missing PIN",
+        },
+        { status: 403 },
+      );
     }
 
-    // Check if the map has a database-stored image and delete it
-    if (mapData && mapData.imageUrl && isDatabaseImage(mapData.imageUrl)) {
-      const imageId = getImageIdFromUrl(mapData.imageUrl);
-      if (imageId) {
-        try {
-          const imagesCollection = db.collection("map_images");
-          await imagesCollection.doc(imageId).delete();
-          console.log(`✓ Deleted associated image: ${imageId}`);
-        } catch (imageError) {
-          console.error(`Failed to delete image ${imageId}:`, imageError);
-          // Continue with map deletion even if image deletion fails
-        }
-      }
-    }
+    const result = await MapModel.deleteOne({ id });
 
-    // Delete the map document
-    await docRef.delete();
+    if (result.deletedCount === 0) {
+      return NextResponse.json(
+        {
+          success: false,
+          error: `Map '${id}' not found`,
+        },
+        { status: 404 },
+      );
+    }
 
     return NextResponse.json({
       success: true,

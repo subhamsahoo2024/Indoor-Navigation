@@ -2,7 +2,6 @@
 
 import { useState, useEffect, useRef, useCallback, useMemo } from "react";
 import { motion, AnimatePresence } from "framer-motion";
-import toast from "react-hot-toast";
 import {
   Play,
   Pause,
@@ -17,11 +16,8 @@ import {
   Loader2,
   Move,
   GripHorizontal,
-  Volume2,
-  VolumeX,
 } from "lucide-react";
 import type { MapData, Node } from "@/types/navigation";
-import NavigationSummary from "./NavigationSummary";
 import type { NavigationResult } from "@/lib/pathfinder";
 import { generateNavigationPath } from "@/lib/pathfinder";
 import { getMap } from "@/lib/mapService";
@@ -32,6 +28,7 @@ import {
   getPointAtProgress,
   calculateAngle,
 } from "@/hooks/useImageDimensions";
+import { getMapImageSrc } from "@/lib/imageUtils";
 
 // Types
 
@@ -62,8 +59,6 @@ export interface IndoorNavigationProps {
   onComplete?: () => void;
   /** Callback when an error occurs */
   onError?: (error: string) => void;
-  /** All available maps (for multi-map path summary) */
-  allMaps?: MapData[];
 }
 
 // ============================================================================
@@ -269,7 +264,6 @@ export default function IndoorNavigation({
   showAllNodes = false,
   onComplete,
   onError,
-  allMaps = [],
 }: IndoorNavigationProps) {
   // Refs
   const containerRef = useRef<HTMLDivElement>(null);
@@ -283,6 +277,12 @@ export default function IndoorNavigation({
   const [currentMapData, setCurrentMapData] = useState<MapData | null>(null);
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
 
+  // Notification state
+  const [showNotification, setShowNotification] = useState(false);
+  const [notificationType, setNotificationType] = useState<
+    "next-map" | "completed"
+  >("next-map");
+
   // Animation state
   const [progress, setProgress] = useState(0);
   const [isAnimating, setIsAnimating] = useState(false);
@@ -290,27 +290,51 @@ export default function IndoorNavigation({
 
   // Playback control state
   const [isPaused, setIsPaused] = useState(false);
-  const [speedMultiplier, setSpeedMultiplier] = useState(1); // 1x or 2x
+  const [speedMultiplier, setSpeedMultiplier] = useState(1); // 1x, 2x, or 4x
   const pausedProgressRef = useRef(0); // Store progress when paused
   const startTimeRef = useRef<number | null>(null);
   const baseDurationRef = useRef(0);
 
-  // Voice summary controls
-  const [voiceControls, setVoiceControls] = useState<{
-    speak: (text: string) => void;
-    stop: () => void;
-    isSpeaking: boolean;
-    hasBrowserSupport: boolean;
-    currentSummary: string | null;
-  } | null>(null);
+  // Map image loading state - prevents race condition where path appears before map
+  const [isMapImageLoaded, setIsMapImageLoaded] = useState(false);
 
   // Use the new image dimensions hook - calculates ACTUAL rendered image size
   // This fixes the "drifting coordinates" bug when image aspect ratio differs from container
   const { imageBounds, isReady, toPixels } = useImageDimensions(
     containerRef,
-    currentMapData?.imageUrl,
+    getMapImageSrc(currentMapData?.mapImage, currentMapData?.imageUrl),
     "top-left", // Our background-position is top-left
   );
+
+  // Preload map image and track when it's ready
+  useEffect(() => {
+    const imageSrc = getMapImageSrc(
+      currentMapData?.mapImage,
+      currentMapData?.imageUrl,
+    );
+    if (!imageSrc) {
+      setIsMapImageLoaded(false);
+      return;
+    }
+
+    // Reset loading state when image source changes
+    setIsMapImageLoaded(false);
+
+    const img = new Image();
+    img.onload = () => {
+      setIsMapImageLoaded(true);
+    };
+    img.onerror = () => {
+      // Still set as loaded to show error state rather than infinite spinner
+      setIsMapImageLoaded(true);
+    };
+    img.src = imageSrc;
+
+    return () => {
+      img.onload = null;
+      img.onerror = null;
+    };
+  }, [currentMapData?.mapImage, currentMapData?.imageUrl]);
 
   // Current segment
   const currentSegment = useMemo(() => {
@@ -356,13 +380,8 @@ export default function IndoorNavigation({
       Math.floor(progress * (pathPixelCoords.length - 1)),
       pathPixelCoords.length - 2,
     );
-    const p1 = pathPixelCoords[idx];
-    const p2 = pathPixelCoords[idx + 1];
-    if (!p1 || !p2) return 0;
-    return calculateAngle(p1, p2);
+    return calculateAngle(pathPixelCoords[idx], pathPixelCoords[idx + 1]);
   }, [pathPixelCoords, progress]);
-
-  // Compute full path across all segments for the summary
 
   // ============================================================================
   // Effects
@@ -404,7 +423,20 @@ export default function IndoorNavigation({
 
           if (firstMap) {
             setCurrentMapData(firstMap);
-            setStatus("NAVIGATING");
+
+            // Check for instant completion (transit map scenario)
+            const firstSegment = result.segments[0];
+            if (firstSegment.pathNodeIds.length <= 1) {
+              // Path has 0 or 1 nodes - instant completion
+              if (firstSegment.transitionTarget && result.segments.length > 1) {
+                setStatus("WAITING_AT_GATEWAY");
+              } else {
+                setStatus("COMPLETED");
+                onComplete?.();
+              }
+            } else {
+              setStatus("NAVIGATING");
+            }
           } else {
             setStatus("ERROR");
             setErrorMessage("Failed to load map");
@@ -465,7 +497,7 @@ export default function IndoorNavigation({
 
     setIsAnimating(true);
     const pathLength = calculatePathLength(pathPixelCoords);
-    const baseDuration = pathLength / 75; // pixels per second
+    const baseDuration = pathLength / 25; // pixels per second
     baseDurationRef.current = baseDuration;
     const duration = baseDuration / (animationSpeed * speedMultiplier);
 
@@ -512,6 +544,17 @@ export default function IndoorNavigation({
     isPaused,
   ]);
 
+  // Auto-hide notification after 4 seconds
+  useEffect(() => {
+    if (!showNotification) return;
+
+    const timer = setTimeout(() => {
+      setShowNotification(false);
+    }, 1500);
+
+    return () => clearTimeout(timer);
+  }, [showNotification]);
+
   // ============================================================================
   // Handlers
   // ============================================================================
@@ -524,37 +567,13 @@ export default function IndoorNavigation({
 
     if (isLastSegment) {
       setStatus("COMPLETED");
-      toast.success("🎉 Destination Reached!", {
-        icon: "🎯",
-        style: {
-          background: "#10b981",
-          color: "#fff",
-        },
-      });
+      setShowNotification(true);
+      setNotificationType("completed");
       onComplete?.();
     } else if (currentSegment.transitionTarget) {
       setStatus("WAITING_AT_GATEWAY");
-
-      // Show notification about next map when reaching gateway
-      const nextIndex = currentSegmentIndex + 1;
-      const nextSegment = navigationResult.segments[nextIndex];
-      if (nextSegment) {
-        // Fetch next map info to show in notification
-        getMap(nextSegment.mapId).then((nextMap) => {
-          if (nextMap) {
-            toast(`Gateway reached! Click continue to enter ${nextMap.name}`, {
-              icon: "🚪",
-              duration: 4000,
-              style: {
-                background: "#f59e0b",
-                color: "#fff",
-                fontSize: "15px",
-                fontWeight: "600",
-              },
-            });
-          }
-        });
-      }
+      setShowNotification(true);
+      setNotificationType("next-map");
     }
   }, [navigationResult, currentSegment, currentSegmentIndex, onComplete]);
 
@@ -574,7 +593,21 @@ export default function IndoorNavigation({
         setCurrentMapData(nextMap);
         setCurrentSegmentIndex(nextIndex);
         setProgress(0);
-        setStatus("NAVIGATING");
+
+        // Check for instant completion (transit map scenario)
+        if (nextSegment.pathNodeIds.length <= 1) {
+          // Path has 0 or 1 nodes - instant completion
+          const isLastSegment =
+            nextIndex === navigationResult.segments.length - 1;
+          if (nextSegment.transitionTarget && !isLastSegment) {
+            setStatus("WAITING_AT_GATEWAY");
+          } else {
+            setStatus("COMPLETED");
+            onComplete?.();
+          }
+        } else {
+          setStatus("NAVIGATING");
+        }
       } else {
         setStatus("ERROR");
         setErrorMessage("Failed to load next map");
@@ -629,7 +662,11 @@ export default function IndoorNavigation({
   }, []);
 
   const handleToggleSpeed = useCallback(() => {
-    setSpeedMultiplier((prev) => (prev === 1 ? 2 : 1));
+    setSpeedMultiplier((prev) => {
+      if (prev === 1) return 2;
+      if (prev === 2) return 4;
+      return 1;
+    });
   }, []);
 
   // ============================================================================
@@ -646,6 +683,10 @@ export default function IndoorNavigation({
     }
     if (status === "WAITING_AT_GATEWAY") {
       const gatewayNode = pathNodes[pathNodes.length - 1];
+      // Check if this was instant completion (transit map)
+      if (pathNodes.length <= 1) {
+        return `Transit point - Ready to continue to next floor`;
+      }
       return `At ${gatewayNode?.name ?? "Gateway"} - Ready to continue`;
     }
     if (status === "NAVIGATING") {
@@ -703,7 +744,7 @@ export default function IndoorNavigation({
           <div className="flex items-center gap-2 sm:gap-3 flex-1 min-w-0">
             {/* Status Icon */}
             <div
-              className={`flex-shrink-0 w-8 h-8 sm:w-10 sm:h-10 rounded-full flex items-center justify-center ${
+              className={`shrink-0 w-8 h-8 sm:w-10 sm:h-10 rounded-full flex items-center justify-center ${
                 status === "COMPLETED"
                   ? "bg-green-100"
                   : status === "ERROR"
@@ -745,44 +786,31 @@ export default function IndoorNavigation({
           </div>
 
           {/* Right: Action Buttons */}
-          <div className="flex items-center gap-2 flex-shrink-0">
-            {/* Voice Replay Button - Always visible when summary available */}
-            {voiceControls?.hasBrowserSupport &&
-              voiceControls?.currentSummary && (
-                <button
-                  onClick={() => {
-                    if (voiceControls.isSpeaking) {
-                      voiceControls.stop();
-                    } else if (voiceControls.currentSummary) {
-                      voiceControls.speak(voiceControls.currentSummary);
-                    }
-                  }}
-                  className={`p-2 rounded-lg transition-colors ${
-                    voiceControls.isSpeaking
-                      ? "bg-red-100 text-red-600 hover:bg-red-200"
-                      : "bg-blue-100 text-blue-600 hover:bg-blue-200"
-                  }`}
-                  title={
-                    voiceControls.isSpeaking
-                      ? "Stop voice"
-                      : "Replay voice guide"
-                  }
-                >
-                  {voiceControls.isSpeaking ? (
-                    <VolumeX className="w-5 h-5" />
-                  ) : (
-                    <Volume2 className="w-5 h-5" />
-                  )}
-                </button>
-              )}
-
-            {/* Gateway: Continue Button */}
+          <div className="flex items-center gap-2 shrink-0">
+            {/* Gateway: Continue Button with Pulsing Blue Glow and Zoom effect */}
             {status === "WAITING_AT_GATEWAY" && (
               <motion.button
                 initial={{ scale: 0.9, opacity: 0 }}
-                animate={{ scale: 1, opacity: 1 }}
+                animate={{
+                  scale: [1, 1.1, 1], // The "zoom in zoom out" effect
+                  opacity: 1,
+                  boxShadow: [
+                    "0 0 0px rgba(59, 130, 246, 0)",
+                    "0 0 20px rgba(59, 130, 246, 0.8)", // The blue light glow
+                    "0 0 0px rgba(59, 130, 246, 0)",
+                  ],
+                }}
+                transition={{
+                  scale: { duration: 1.5, repeat: Infinity, ease: "easeInOut" },
+                  boxShadow: {
+                    duration: 1.5,
+                    repeat: Infinity,
+                    ease: "easeInOut",
+                  },
+                  opacity: { duration: 0.3 },
+                }}
                 onClick={handleContinueToNextMap}
-                className="flex items-center gap-2 px-4 py-2 bg-blue-500 hover:bg-blue-600 text-white font-medium rounded-lg transition-colors shadow-lg shadow-blue-500/30"
+                className="flex items-center gap-2 px-4 py-2 bg-blue-500 hover:bg-blue-600 text-white font-medium rounded-lg transition-colors z-50 relative shadow-lg"
               >
                 <LogIn className="w-4 h-4" />
                 <span>
@@ -877,46 +905,48 @@ export default function IndoorNavigation({
                 className="flex items-center gap-2 px-4 py-2 bg-blue-500/90 text-white text-sm font-medium rounded-full shadow-lg backdrop-blur-sm"
               >
                 <Move className="w-4 h-4" />
-                <span>Drag to pan</span>
+                <span>Scroll to Pan</span>
               </div>
             </motion.div>
           )}
         </AnimatePresence>
 
-        {/* Navigation Summary (Headless - No UI, just voice) */}
-        {status === "NAVIGATING" && pathNodes.length > 0 && currentSegment && (
-          <NavigationSummary
-            pathNodes={pathNodes}
-            mapId={currentSegment.mapId}
-            isLastMap={
-              currentSegmentIndex ===
-              (navigationResult?.segments.length ?? 1) - 1
-            }
-            isVisible={true}
-            onVoiceControlsReady={setVoiceControls}
-          />
-        )}
-
         {/* Large Content Wrapper - Forces Scroll on Mobile */}
         <div
           ref={containerRef}
-          className="relative bg-gradient-to-br from-slate-200 to-slate-300"
+          className={`relative bg-linear-to-br from-slate-200 to-slate-300 transition-opacity duration-500 ${
+            isMapImageLoaded ? "opacity-100" : "opacity-0"
+          }`}
           style={{
             // Large minimum dimensions to trigger scrolling on mobile
             minWidth: "1200px",
             minHeight: "800px",
             width: Math.max(imageBounds.containerWidth || 1200, 1200),
             height: Math.max(imageBounds.containerHeight || 800, 800),
-            backgroundImage: currentMapData?.imageUrl
-              ? `url(${currentMapData.imageUrl})`
+            backgroundImage: getMapImageSrc(
+              currentMapData?.mapImage,
+              currentMapData?.imageUrl,
+            )
+              ? `url(${getMapImageSrc(currentMapData?.mapImage, currentMapData?.imageUrl)})`
               : undefined,
             backgroundSize: "contain",
             backgroundRepeat: "no-repeat",
             backgroundPosition: "top left",
           }}
         >
+          {/* Map Image Loading Spinner - shown until image is fully loaded */}
+          {!isMapImageLoaded && status !== "LOADING" && status !== "IDLE" && (
+            <div className="absolute inset-0 flex items-center justify-center bg-slate-200 z-20">
+              <div className="flex flex-col items-center gap-4">
+                <Loader2 className="w-12 h-12 text-blue-500 animate-spin" />
+                <p className="text-slate-600 font-medium">Loading map...</p>
+              </div>
+            </div>
+          )}
+
           {/* SVG Overlay - positioned and sized to match ACTUAL rendered image */}
-          {isReady && (
+          {/* Only render when both dimensions are ready AND map image is loaded */}
+          {isReady && isMapImageLoaded && (
             <svg
               className="absolute pointer-events-none"
               style={{
@@ -1027,7 +1057,7 @@ export default function IndoorNavigation({
               {/* Restart Button - Touch Friendly */}
               <button
                 onClick={handleRestartSegment}
-                className="p-3 min-h-[44px] min-w-[44px] rounded-xl hover:bg-gray-100 text-gray-600 hover:text-gray-800 transition-colors flex items-center justify-center"
+                className="p-3 min-h-11 min-w-11 rounded-xl hover:bg-gray-100 text-gray-600 hover:text-gray-800 transition-colors flex items-center justify-center"
                 title="Restart segment"
               >
                 <RotateCcw className="w-5 h-5" />
@@ -1036,7 +1066,7 @@ export default function IndoorNavigation({
               {/* Play/Pause Button - Large and Center */}
               <button
                 onClick={handlePlayPause}
-                className={`p-4 min-h-[56px] min-w-[56px] rounded-2xl transition-all flex items-center justify-center ${
+                className={`p-4 min-h-14 min-w-14 rounded-2xl transition-all flex items-center justify-center ${
                   isPaused
                     ? "bg-blue-500 text-white hover:bg-blue-600 shadow-lg shadow-blue-500/30"
                     : "bg-gray-100 text-gray-700 hover:bg-gray-200"
@@ -1053,20 +1083,84 @@ export default function IndoorNavigation({
               {/* Speed Toggle Button - Touch Friendly */}
               <button
                 onClick={handleToggleSpeed}
-                className={`flex items-center gap-1 px-4 py-3 min-h-[44px] rounded-xl text-sm font-semibold transition-all ${
-                  speedMultiplier === 2
-                    ? "bg-amber-100 text-amber-700 hover:bg-amber-200"
-                    : "bg-gray-100 text-gray-600 hover:bg-gray-200"
+                className={`flex items-center gap-1 px-4 py-3 min-h-11 rounded-xl text-sm font-semibold transition-all ${
+                  speedMultiplier === 4
+                    ? "bg-red-100 text-red-700 hover:bg-red-200"
+                    : speedMultiplier === 2
+                      ? "bg-amber-100 text-amber-700 hover:bg-amber-200"
+                      : "bg-gray-100 text-gray-600 hover:bg-gray-200"
                 }`}
                 title="Toggle speed"
               >
                 <Gauge className="w-4 h-4" />
-                <span>{speedMultiplier}x</span>
+                <span>
+                  {speedMultiplier === 4
+                    ? "3"
+                    : speedMultiplier === 2
+                      ? "2"
+                      : "1"}
+                  x
+                </span>
               </button>
             </div>
           </motion.div>
         )}
       </div>
+
+      {/* Smooth Notifications */}
+      <AnimatePresence>
+        {showNotification && notificationType === "next-map" && (
+          <motion.div
+            initial={{ opacity: 0, y: -20, scale: 0.95 }}
+            animate={{ opacity: 1, y: 0, scale: 1 }}
+            exit={{ opacity: 0, y: -20, scale: 0.95 }}
+            transition={{
+              type: "spring",
+              stiffness: 300,
+              damping: 30,
+            }}
+            className="fixed top-20 left-1/2 -translate-x-1/2 z-40 pointer-events-none px-4"
+          >
+            <div className="flex items-center gap-3 px-6 py-4 bg-linear-to-r from-amber-400 to-amber-500 text-white rounded-2xl shadow-2xl">
+              <LogIn className="w-6 h-6" />
+              <div>
+                <p className="text-sm text-amber-50">
+                  Proceed to the next map to continue your route
+                </p>
+              </div>
+            </div>
+          </motion.div>
+        )}
+
+        {showNotification && notificationType === "completed" && (
+          <motion.div
+            initial={{ opacity: 0, y: -20, scale: 0.95 }}
+            animate={{ opacity: 1, y: 0, scale: 1 }}
+            exit={{ opacity: 0, y: -20, scale: 0.95 }}
+            transition={{
+              type: "spring",
+              stiffness: 300,
+              damping: 30,
+            }}
+            className="fixed top-20 left-1/2 -translate-x-1/2 z-40 pointer-events-none px-4"
+          >
+            <div className="flex items-center gap-3 px-6 py-4 bg-linear-to-r from-green-400 to-green-500 text-white rounded-2xl shadow-2xl">
+              <motion.div
+                animate={{ scale: [1, 1.2, 1] }}
+                transition={{ duration: 0.6, repeat: Infinity }}
+              >
+                <CheckCircle2 className="w-6 h-6" />
+              </motion.div>
+              <div>
+                <p className="font-bold text-lg">Destination Reached</p>
+                <p className="text-sm text-green-50">
+                  You have arrived at your destination
+                </p>
+              </div>
+            </div>
+          </motion.div>
+        )}
+      </AnimatePresence>
     </div>
   );
 }
